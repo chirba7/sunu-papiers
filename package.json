@@ -1,0 +1,10 @@
+{
+  "name": "sunu-papiers",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix citoyen && npm install --prefix delegue && npm install --prefix administrateur",
+    "dev:api": "npm run dev --prefix backend",
+    "start:api": "npm start --prefix backend",
+    "test": "npm test --prefix backend"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "sunu-papiers-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server-supabase.js",
+    "start": "node src/server-supabase.js",
+    "test": "node --check src/server-supabase.js",
+    "check:supabase": "node scripts/check-supabase.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "pdf-lib": "^1.17.1"
+  }
+}
