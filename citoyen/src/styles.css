@@ -283,3 +283,202 @@ button, a { outline-offset: 3px; }
   .modal { padding: 22px; }
   .pin-modal { padding: 30px 21px 24px; }
 }
+
+/* ==========================================================================
+   v2 — Typographie plus lisible, statuts distincts, filtres, responsive
+   Bloc placé en fin de fichier : il complète et surcharge les règles ci-dessus.
+   ========================================================================== */
+
+:root {
+  --wait: #a06a00;
+  --wait-bg: #fff6e2;
+  --wait-line: #ffe1a6;
+  --ok: #15794f;
+  --ok-bg: #e9f8f0;
+  --ok-line: #c4ecd8;
+  --bad: #b8342a;
+  --bad-bg: #fdecea;
+  --bad-line: #f6c8c2;
+  font-size: 16px;
+}
+
+body { font-size: 16px; line-height: 1.62; }
+
+/* --- Typographie : textes plus grands et lisibles ------------------------ */
+.page-eyebrow { font-size: 13px; }
+.welcome-block p:not(.page-eyebrow),
+.page-title-row p:not(.page-eyebrow) { font-size: 17px; }
+.count-badge { font-size: 13px; padding: 8px 13px; }
+.available-label { font-size: 12px; }
+.section-heading h2 { font-size: 22px; }
+.section-heading p { font-size: 15px; }
+.document-card h3 { font-size: 21px; }
+.document-card p { font-size: 15.5px; line-height: 1.6; }
+.profile-section-title h2 { font-size: 20px; }
+.profile-section-title p { font-size: 15px; }
+.profile-grid label > span { font-size: 14.5px; }
+.profile-grid input, .profile-grid select { font-size: 16px; }
+.field > div > label, .field label { font-size: 15px; }
+.bottom-nav button span:last-child { font-size: 12.5px; }
+.user-pill strong { font-size: 15px; }
+.user-pill small { font-size: 13px; }
+.toast strong { font-size: 15px; }
+.toast span { font-size: 13.5px; }
+.paper-list-card h2 { font-size: 22px; }
+.paper-list-card p { font-size: 15.5px; }
+
+/* --- Accueil : deux services, dont un « bientôt disponible » ------------- */
+.documents-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.document-card.is-soon { cursor: default; background: #f7faf8; border-style: dashed; box-shadow: none; opacity: .95; }
+.document-card.is-soon:hover { transform: none; border-color: #d9e5df; }
+.document-card.is-soon h3 { color: #4a5c55; }
+.soon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wait);
+  background: var(--wait-bg);
+  border: 1px solid var(--wait-line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 800;
+}
+.document-arrow.soon { color: #9aa8a2; }
+
+/* --- Mes papiers : filtres ---------------------------------------------- */
+.paper-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+.filter-field { display: grid; gap: 7px; min-width: 0; }
+.filter-field > span { font-size: 14px; font-weight: 700; color: #46584f; }
+.filter-field select {
+  width: 100%;
+  height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0 14px;
+  font-size: 16px;
+  color: var(--ink);
+  outline: none;
+}
+.filter-field select:focus { border-color: var(--green-700); box-shadow: 0 0 0 3px rgba(15, 107, 73, .12); }
+.refresh-button {
+  height: 50px;
+  padding: 0 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #2d443b;
+  font-size: 15px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+.refresh-button:disabled { opacity: .6; cursor: progress; }
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+
+/* --- Mes papiers : cartes de statut ------------------------------------- */
+.paper-list { display: grid; gap: 16px; }
+.paper-card {
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  padding: 20px 22px;
+  box-shadow: 0 12px 32px rgba(32, 65, 53, .05);
+}
+.paper-card.tone-wait { border-left-color: #f0a500; background: linear-gradient(180deg, #fffdf6, #fff); }
+.paper-card.tone-ok { border-left-color: #1f9d63; }
+.paper-card.tone-bad { border-left-color: #d0483c; background: linear-gradient(180deg, #fffaf9, #fff); }
+
+.paper-card-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.paper-icon { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: #edf7f2; color: var(--green-700); flex: none; }
+.paper-card.tone-wait .paper-icon { background: var(--wait-bg); color: var(--wait); }
+.paper-card.tone-bad .paper-icon { background: var(--bad-bg); color: var(--bad); }
+.paper-title { flex: 1; min-width: 180px; display: grid; gap: 3px; }
+.paper-title h3 { margin: 0; font-family: 'Manrope', sans-serif; font-size: 19px; }
+.paper-title span { font-size: 14px; color: var(--muted); }
+.paper-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 800;
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.paper-badge.tone-wait { color: var(--wait); background: var(--wait-bg); border-color: var(--wait-line); }
+.paper-badge.tone-ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-line); }
+.paper-badge.tone-bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-line); }
+.paper-badge.tone-neutral { color: var(--muted); background: #f1f4f2; border-color: var(--line); }
+
+.paper-help { margin: 14px 0 0; font-size: 15px; color: #55665e; line-height: 1.55; }
+.paper-reason {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bad-bg);
+  border: 1px solid var(--bad-line);
+  color: var(--bad);
+}
+.paper-reason strong { display: block; font-size: 14px; text-transform: uppercase; letter-spacing: .05em; }
+.paper-reason p { margin: 5px 0 0; font-size: 15.5px; line-height: 1.6; color: #7a3229; }
+
+.paper-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.paper-address { display: inline-flex; align-items: center; gap: 7px; font-size: 14.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.paper-card-foot .save-button, .paper-card-foot .secondary-button { height: 46px; padding: 0 18px; font-size: 15px; gap: 8px; display: inline-flex; align-items: center; }
+.paper-error { display: flex; gap: 10px; align-items: center; padding: 15px 17px; border-radius: 14px; background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad); font-size: 15px; margin-bottom: 18px; }
+.paper-loading { font-size: 16px; color: var(--muted); }
+
+/* --- Responsive : téléphone --------------------------------------------- */
+@media (max-width: 780px) {
+  .page-content { width: min(1040px, calc(100% - 32px)); padding: 30px 0 120px; }
+  .documents-grid { grid-template-columns: 1fr; }
+  .document-card { min-height: 0; padding: 20px; gap: 16px; border-radius: 18px; }
+  .paper-filters { grid-template-columns: 1fr; gap: 12px; }
+  .refresh-button { width: 100%; justify-content: center; }
+  .paper-card { padding: 17px; border-radius: 17px; }
+  .paper-card-head { gap: 11px; }
+  .paper-title { min-width: 100%; order: 2; }
+  .paper-badge { order: 3; }
+  .paper-card-foot { align-items: stretch; flex-direction: column; }
+  .paper-card-foot .save-button, .paper-card-foot .secondary-button { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 480px) {
+  .paper-title h3 { font-size: 17.5px; }
+  .document-card h3 { font-size: 19px; }
+  .paper-help, .paper-reason p { font-size: 15px; }
+}
+
+/* --- Responsive : grand écran ------------------------------------------- */
+@media (min-width: 1100px) {
+  .page-content { width: min(1160px, calc(100% - 64px)); }
+  .paper-list { grid-template-columns: 1fr; }
+}

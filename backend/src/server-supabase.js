@@ -70,6 +70,38 @@ const files = upload.fields([
   { name: "signature", maxCount: 1 },
   { name: "stamp", maxCount: 1 },
 ]);
+// --- Cache memoire du compteur de demandes ---------------------------------
+// Evite de recalculer les compteurs a chaque sondage du front (toutes les 20 s).
+// Cle = identifiant du delegue. TTL court : une nouvelle demande est visible
+// au plus tard SUMMARY_TTL apres son depot, et immediatement si le cache est
+// invalide par une ecriture (creation ou traitement d'une demande).
+const SUMMARY_TTL = 30_000;
+const summaryCache = new Map();
+const readSummaryCache = (key) => {
+  const entry = summaryCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    summaryCache.delete(key);
+    return null;
+  }
+  return entry.payload;
+};
+const writeSummaryCache = (key, payload) => {
+  summaryCache.set(key, { payload, expiresAt: Date.now() + SUMMARY_TTL });
+  return payload;
+};
+const clearSummaryCache = (key) => {
+  if (key) summaryCache.delete(key);
+  else summaryCache.clear();
+};
+
+const REJECTION_REASONS = {
+  incoherence: "Incohérence des informations fournies",
+  mauvaise_maison: "Mauvaise administration de quartier sélectionnée",
+  documents_illisibles: "Pièce d’identité illisible ou incomplète",
+  autre: "Autre motif",
+};
+
 const cleanPhone = (v = "") => String(v).replace(/\D/g, "").slice(0, 9);
 const citizenEmail = (phone) => `${cleanPhone(phone)}@citoyen.sunupapier.local`;
 const required = (body, keys) =>
@@ -766,6 +798,8 @@ app.post("/api/requests", authenticate, permit("citizen"), async (req, res) => {
     .select()
     .single();
   if (error) return fail(res, error);
+  // Une nouvelle demande arrive : le compteur du delegue concerne doit etre recalcule.
+  clearSummaryCache(house.delegate_id);
   res
     .status(201)
     .json({ id: data.id, reference: data.reference, status: data.status });
@@ -790,8 +824,50 @@ app.get(
         address: r.address,
         certificatePath: r.certificate_path,
         submittedAt: r.submitted_at,
+        processedAt: r.processed_at,
+        rejectionCode: r.rejection_code,
+        rejectionReason: r.rejection_reason,
       })),
     );
+  },
+);
+// Compteur leger sonde par le front toutes les 20 s.
+// Une seule requete, deux colonnes, et un cache memoire de 30 s : la base n'est
+// pas sollicitee a chaque sondage.
+app.get(
+  "/api/delegate/requests/summary",
+  authenticate,
+  permit("delegate"),
+  async (req, res) => {
+    res.set("Cache-Control", "private, max-age=10");
+    const force = req.query.refresh === "1";
+    const cached = force ? null : readSummaryCache(req.user.id);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return res.json(cached);
+    }
+    const { data, error } = await supabaseAdmin
+      .from("document_requests")
+      .select("status,submitted_at")
+      .eq("delegate_id", req.user.id);
+    if (error) return fail(res, error);
+    const count = (status) => data.filter((r) => r.status === status).length;
+    const latest = data.reduce(
+      (max, r) => (r.submitted_at > max ? r.submitted_at : max),
+      "",
+    );
+    const payload = {
+      pending: count("pending") + count("processing"),
+      approved: count("approved"),
+      rejected: count("rejected"),
+      total: data.length,
+      latestSubmittedAt: latest || null,
+    };
+    // Signature comparee cote client : tant qu'elle ne bouge pas, la liste
+    // complete n'est pas rechargee.
+    payload.signature = `${payload.total}:${payload.pending}:${payload.approved}:${payload.rejected}:${latest}`;
+    res.set("X-Cache", "MISS");
+    res.json(writeSummaryCache(req.user.id, payload));
   },
 );
 app.get(
@@ -857,6 +933,40 @@ app.patch(
         ? r.citizen.citizen_profiles[0]
         : r.citizen.citizen_profiles;
       const b = req.body;
+      // --- Desapprobation -------------------------------------------------
+      if (b.status === "rejected") {
+        const code = REJECTION_REASONS[b.rejectionCode]
+          ? b.rejectionCode
+          : "autre";
+        const message = String(b.rejectionReason || "").trim();
+        if (!message)
+          return fail(
+            res,
+            new Error(
+              "Expliquez au citoyen la raison du refus (message obligatoire).",
+            ),
+          );
+        if (message.length > 600)
+          return fail(res, new Error("Le message ne doit pas dépasser 600 caractères."));
+        const { error: rejectError } = await supabaseAdmin
+          .from("document_requests")
+          .update({
+            status: "rejected",
+            rejection_code: code,
+            rejection_reason: message,
+            certificate_path: null,
+            processed_at: new Date().toISOString(),
+          })
+          .eq("id", r.id);
+        if (rejectError) throw rejectError;
+        clearSummaryCache(req.user.id);
+        return res.json({
+          message: "Demande désapprouvée. Le citoyen a été informé du motif.",
+          status: "rejected",
+          rejectionCode: code,
+          rejectionReason: message,
+        });
+      }
       if (
         b.status === "approved" &&
         (!b.birthDate ||
@@ -936,10 +1046,13 @@ app.patch(
           lot_number: b.lotNumber,
           address: b.address || r.address,
           certificate_path: certificatePath,
+          rejection_code: null,
+          rejection_reason: null,
           processed_at: new Date().toISOString(),
         })
         .eq("id", r.id);
       if (updateError) throw updateError;
+      clearSummaryCache(req.user.id);
       res.json({
         message: "Demande mise à jour.",
         status: b.status || "approved",

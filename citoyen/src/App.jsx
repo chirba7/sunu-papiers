@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ChevronRight, Eye, EyeOff,
-  FileCheck2, FileText, Home, IdCard, LockKeyhole, LogOut, Phone, ShieldCheck,
-  Sparkles, UserRound, X
+  AlertCircle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ChevronRight, Clock,
+  Download, Eye, EyeOff, FileCheck2, FileText, Home, Hourglass, IdCard, Lock, LockKeyhole,
+  LogOut, MapPin, Phone, RotateCw, ShieldCheck, Sparkles, UserRound, X, XCircle
 } from 'lucide-react'
 import { api, isLoggedIn, login, logout as apiLogout, register, uploadUrl } from './api.js'
+import { DOCUMENT_TYPES, paperStatus, refreshPapers, resetPapers, usePapers } from './papers-store.js'
 
 const pause = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -378,6 +379,7 @@ function AppHeader({ profile }) {
   const navigate = useNavigate()
   const logout = () => {
     apiLogout()
+    resetPapers()
     navigate('/connexion', { replace: true })
   }
 
@@ -413,40 +415,165 @@ function HomePage({ profile }) {
       <section className="documents-section">
         <div className="section-heading">
           <div><h2>Mes démarches administratives</h2><p>Les documents disponibles apparaissent ici.</p></div>
-          <span className="count-badge">1 service</span>
+          <span className="count-badge">1 service disponible</span>
         </div>
 
-        <button className="document-card" type="button" onClick={()=>navigate('/app/nouvelle-demande')}>
-          <div className="document-icon"><FileText size={28}/></div>
-          <div className="document-copy">
-            <div className="available-label"><span/> Disponible</div>
-            <h3>Certificat de domicile</h3>
-            <p>Effectuez votre demande de certificat de domicile depuis votre espace citoyen.</p>
+        <div className="documents-grid">
+          <button className="document-card" type="button" onClick={()=>navigate('/app/nouvelle-demande')}>
+            <div className="document-icon"><FileText size={28}/></div>
+            <div className="document-copy">
+              <div className="available-label"><span/> Disponible</div>
+              <h3>Certificat de domicile</h3>
+              <p>Effectuez votre demande de certificat de domicile depuis votre espace citoyen.</p>
+            </div>
+            <span className="document-arrow"><ChevronRight size={21}/></span>
+          </button>
+
+          <div className="document-card is-soon" aria-disabled="true">
+            <div className="document-icon"><Home size={28}/></div>
+            <div className="document-copy">
+              <div className="soon-label"><Clock size={13}/> Bientôt disponible</div>
+              <h3>Certificat de résidence</h3>
+              <p>Ce service sera ouvert prochainement depuis votre espace citoyen.</p>
+            </div>
+            <span className="document-arrow soon"><Lock size={18}/></span>
           </div>
-          <span className="document-arrow"><ChevronRight size={21}/></span>
-        </button>
+        </div>
       </section>
     </div>
   )
 }
 
+const dateFR = (value) =>
+  value ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(value)) : ''
+
+function PaperCard({ paper, onRedo }) {
+  const meta = paperStatus(paper.status)
+  const Icon = meta.tone === 'ok' ? CheckCircle2 : meta.tone === 'bad' ? XCircle : Hourglass
+  return (
+    <article className={`paper-card tone-${meta.tone}`}>
+      <div className="paper-card-head">
+        <span className="paper-icon"><FileText size={20} /></span>
+        <div className="paper-title">
+          <h3>{paper.type}</h3>
+          <span>{paper.reference} · demandé le {dateFR(paper.submittedAt)}</span>
+        </div>
+        <span className={`paper-badge tone-${meta.tone}`}><Icon size={14} />{meta.label}</span>
+      </div>
+
+      <p className="paper-help">{meta.help}</p>
+
+      {paper.status === 'rejected' && paper.rejectionReason && (
+        <div className="paper-reason">
+          <AlertCircle size={18} />
+          <div><strong>Motif du refus</strong><p>{paper.rejectionReason}</p></div>
+        </div>
+      )}
+
+      <div className="paper-card-foot">
+        <span className="paper-address"><MapPin size={15} />{paper.address}</span>
+        {paper.status === 'approved' && paper.certificatePath && (
+          <a className="save-button" href={uploadUrl(paper.certificatePath)} target="_blank" rel="noreferrer">
+            <Download size={17} /> Télécharger le certificat
+          </a>
+        )}
+        {paper.status === 'rejected' && (
+          <button type="button" className="secondary-button" onClick={onRedo}>Refaire une demande</button>
+        )}
+      </div>
+    </article>
+  )
+}
+
 function PapersPage() {
-  const [papers,setPapers]=useState([])
-  useEffect(()=>{api('/requests/mine').then(setPapers).catch(()=>{})},[])
+  const navigate = useNavigate()
+  const { papers, loading, refreshing, error } = usePapers()
+  const [status, setStatus] = useState('all')
+  const [type, setType] = useState('domicile')
+
+  const typeFilter = DOCUMENT_TYPES.find((t) => t.value === type)
+
+  const byType = useMemo(
+    () => papers.filter((p) => !typeFilter || typeFilter.match.test(p.type || '')),
+    [papers, typeFilter],
+  )
+
+  const counts = useMemo(() => ({
+    all: byType.length,
+    pending: byType.filter((p) => p.status === 'pending' || p.status === 'processing').length,
+    approved: byType.filter((p) => p.status === 'approved').length,
+    rejected: byType.filter((p) => p.status === 'rejected').length,
+  }), [byType])
+
+  const filtered = useMemo(() => {
+    const rows = status === 'all'
+      ? byType
+      : status === 'pending'
+        ? byType.filter((p) => p.status === 'pending' || p.status === 'processing')
+        : byType.filter((p) => p.status === status)
+    // Les demandes en attente d'abord, puis les plus récentes.
+    return [...rows].sort((a, b) => {
+      const openA = a.status === 'pending' || a.status === 'processing' ? 0 : 1
+      const openB = b.status === 'pending' || b.status === 'processing' ? 0 : 1
+      if (openA !== openB) return openA - openB
+      return String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''))
+    })
+  }, [byType, status])
+
   return (
     <div className="page-content">
       <section className="page-title-row">
         <div>
           <p className="page-eyebrow">Documents</p>
           <h1>Mes papiers</h1>
-          <p>Retrouvez ici les documents administratifs obtenus depuis Sunu Papier.</p>
+          <p>Retrouvez ici vos demandes et les certificats obtenus avec Sunu Papier.</p>
         </div>
-        <div className="page-icon-box"><FileCheck2 size={26}/></div>
+        <div className="page-icon-box"><FileCheck2 size={26} /></div>
       </section>
 
-      <section className="paper-list-card">
-        {papers.length===0?<><div className="empty-paper-icon"><FileText size={28}/></div><h2>Aucun certificat pour le moment</h2><p>Vos demandes et certificats apparaîtront ici.</p></>:papers.map(p=><div key={p.id} className="parent-block"><div className="profile-section-title"><span><FileText size={18}/></span><div><h2>{p.reference}</h2><p>{p.type} · {p.address}</p></div></div><div className="paper-status-row"><strong>{p.status==='pending'?'En attente':p.status==='approved'?'Validée':p.status==='rejected'?'Rejetée':'En traitement'}</strong>{p.certificatePath&&<a className="save-button" href={uploadUrl(p.certificatePath)} target="_blank" rel="noreferrer">Télécharger le certificat</a>}</div></div>)}
-      </section>
+      <div className="paper-filters">
+        <label className="filter-field">
+          <span>Type de document</span>
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            {DOCUMENT_TYPES.map((t) => (
+              <option key={t.value} value={t.value} disabled={!t.available}>
+                {t.available ? t.label : `${t.label} — bientôt disponible`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>Statut</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="all">Tous ({counts.all})</option>
+            <option value="pending">En attente ({counts.pending})</option>
+            <option value="approved">Approuvés ({counts.approved})</option>
+            <option value="rejected">Désapprouvés ({counts.rejected})</option>
+          </select>
+        </label>
+        <button type="button" className="refresh-button" onClick={refreshPapers} disabled={refreshing} title="Actualiser">
+          <RotateCw size={17} className={refreshing ? 'spinning' : ''} />
+          <span>{refreshing ? 'Actualisation…' : 'Actualiser'}</span>
+        </button>
+      </div>
+
+      {error && papers.length === 0 && <div className="paper-error"><AlertCircle size={18} />{error}</div>}
+
+      {loading && papers.length === 0 ? (
+        <section className="paper-list-card"><p className="paper-loading">Chargement de vos documents…</p></section>
+      ) : filtered.length === 0 ? (
+        <section className="paper-list-card">
+          <div className="empty-paper-icon"><FileText size={28} /></div>
+          <h2>{papers.length === 0 ? 'Aucun certificat pour le moment' : 'Aucun document dans ce filtre'}</h2>
+          <p>{papers.length === 0 ? 'Vos demandes et certificats apparaîtront ici.' : 'Changez de statut ou de type de document pour voir vos autres demandes.'}</p>
+        </section>
+      ) : (
+        <section className="paper-list">
+          {filtered.map((paper) => (
+            <PaperCard key={paper.id} paper={paper} onRedo={() => navigate('/app/nouvelle-demande')} />
+          ))}
+        </section>
+      )}
     </div>
   )
 }
@@ -559,7 +686,7 @@ function AccountPage({ profile, setProfile, setToast }) {
 function RequestPage({ setToast }) {
   const navigate=useNavigate(); const [houses,setHouses]=useState([]); const [houseId,setHouseId]=useState(''); const [loading,setLoading]=useState(false); const [loadingHouses,setLoadingHouses]=useState(true); const [housesError,setHousesError]=useState('')
   useEffect(()=>{api('/houses').then(setHouses).catch(e=>{setHousesError(e.message);setToast(e.message)}).finally(()=>setLoadingHouses(false))},[setToast])
-  const submit=async(e)=>{e.preventDefault();if(!houseId){setToast('Choisissez une administration.');return}setLoading(true);try{const result=await api('/requests',{method:'POST',body:JSON.stringify({houseId:Number(houseId)})});setToast(`Demande ${result.reference} envoyée.`);navigate('/app/mes-papiers')}catch(error){setToast(error.message)}finally{setLoading(false)}}
+  const submit=async(e)=>{e.preventDefault();if(!houseId){setToast('Choisissez une administration.');return}setLoading(true);try{const result=await api('/requests',{method:'POST',body:JSON.stringify({houseId:Number(houseId)})});setToast(`Demande ${result.reference} envoyée.`);refreshPapers();navigate('/app/mes-papiers')}catch(error){setToast(error.message)}finally{setLoading(false)}}
   return <div className="page-content account-page"><section className="page-title-row"><div><p className="page-eyebrow">Nouvelle démarche</p><h1>Certificat de domicile</h1><p>La demande sera transmise à l’administration de quartier sélectionnée.</p></div><div className="page-icon-box"><FileText size={26}/></div></section><form className="profile-form" onSubmit={submit}><section className="profile-section"><div className="profile-section-title"><span>01</span><div><h2>Administration</h2><p>Sélectionnez la maison du délégué correspondant à votre quartier.</p></div></div><div className="profile-grid"><label className="full"><span>Administration de quartier</span><select value={houseId} onChange={e=>setHouseId(e.target.value)} disabled={loadingHouses||Boolean(housesError)}><option value="">{loadingHouses?'Chargement des administrations…':'Choisir une administration'}</option>{houses.map(h=><option key={h.id} value={h.id}>Maison de quartier de {h.quartier} — {h.commune}, {h.departement}</option>)}</select></label>{!loadingHouses&&!housesError&&houses.length===0&&<p className="full">Aucune administration de quartier n’est disponible pour le moment.</p>}{housesError&&<p className="full">Impossible de charger les administrations : {housesError}</p>}</div></section><div className="profile-save-bar"><div><ShieldCheck size={18}/><span>Votre dossier sera accessible uniquement au délégué affecté à cette administration.</span></div><button className="save-button" disabled={loading||loadingHouses||houses.length===0}>{loading?'Envoi…':'Envoyer la demande'}</button></div></form></div>
 }
 
