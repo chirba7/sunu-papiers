@@ -15,11 +15,49 @@ import { generateCertificate } from "./certificate.js";
 requireSupabaseConfig();
 const app = express(),
   port = Number(process.env.PORT) || 4000;
-const origins = (
-  process.env.FRONTEND_ORIGINS ||
-  "http://localhost:5173,http://localhost:5174,http://localhost:5175"
-).split(",");
-app.use(cors({ origin: origins }));
+// --- CORS -------------------------------------------------------------
+// Origines autorisees : la variable FRONTEND_ORIGINS (liste separee par des
+// virgules) si elle existe, sinon la liste par defaut ci-dessous.
+const DEFAULT_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "https://citoyen-alpha.vercel.app",
+  "https://delegue.vercel.app",
+  "https://administrateur-three.vercel.app",
+];
+const origins = (process.env.FRONTEND_ORIGINS || "")
+  .split(",")
+  .map((value) => value.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+const allowedOrigins = new Set(origins.length ? origins : DEFAULT_ORIGINS);
+// Les deploiements de previsualisation Vercel des 3 apps (ex: citoyen-git-main-xxx.vercel.app)
+const PREVIEW_ORIGIN =
+  /^https:\/\/(citoyen|delegue|administrateur)[a-z0-9-]*\.vercel\.app$/i;
+const isAllowedOrigin = (origin) =>
+  !origin ||
+  allowedOrigins.has(origin.replace(/\/$/, "")) ||
+  PREVIEW_ORIGIN.test(origin) ||
+  /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    console.warn("Origine CORS refusee :", origin);
+    return callback(null, false);
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Content-Disposition"],
+  maxAge: 86400,
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+// Reponse immediate aux requetes preflight (OPTIONS) sur toutes les routes.
+app.use((req, res, next) =>
+  req.method === "OPTIONS" ? res.sendStatus(204) : next(),
+);
 app.use(express.json({ limit: "2mb" }));
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -917,7 +955,12 @@ app.use((error, _req, res, _next) => {
   console.error(error);
   fail(res, error, error.code === "LIMIT_FILE_SIZE" ? 413 : 500);
 });
-await bootstrapAdmin();
+// Ne jamais faire echouer le demarrage du serveur a cause du bootstrap admin :
+// sur Vercel une exception ici rendrait TOUTES les routes indisponibles
+// (500 sans en-tetes CORS, ce qui ressemble a une erreur CORS cote navigateur).
+bootstrapAdmin().catch((error) =>
+  console.error("bootstrapAdmin a echoue :", error?.message || error),
+);
 if (!process.env.VERCEL) {
   app.listen(port, () =>
     console.log(`API Sunu Papier (Supabase) : http://localhost:${port}`),
