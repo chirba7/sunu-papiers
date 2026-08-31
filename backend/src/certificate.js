@@ -8,7 +8,7 @@ const rule = rgb(0.82, 0.78, 0.68);
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
-const FIELDS_TOP = 568;
+const FIELDS_TOP = 578;
 const FIELDS_BOTTOM = 250;
 const MAX_STEP = 42;
 const MIN_STEP = 30;
@@ -206,7 +206,7 @@ export async function generateCertificate({ request, uploadDir }) {
     request.delegate_sequence || request.reference?.split("-").pop() || "",
   ).padStart(3, "0");
 
-  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: rgb(0.995, 0.992, 0.982) });
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: rgb(1, 1, 1) });
   const header = [
     `RÉGION : ${region}`,
     `DÉPARTEMENT : ${departement}`,
@@ -216,14 +216,13 @@ export async function generateCertificate({ request, uploadDir }) {
   header.forEach((text, index) => page.drawText(text, { x: 52, y: 784 - index * 20, size: 11, font: sansBold, color: ink }));
   page.drawText(`${commune}, le ${today}`, { x: 385, y: 784, size: 10.5, font: sansBold, color: muted });
   page.drawText(`Dossier N° ${dossierNumber}`, { x: 429, y: 744, size: 10.5, font: sansBold, color: muted });
-  page.drawText("Certificat de domicile", { x: 52, y: 696, size: 11, font: sans, color: muted });
-  page.drawLine({ start: { x: 52, y: 676 }, end: { x: 543, y: 676 }, thickness: 0.8, color: rule });
+  page.drawLine({ start: { x: 52, y: 700 }, end: { x: 543, y: 700 }, thickness: 0.8, color: rule });
 
   const title = "CERTIFICAT DE DOMICILE";
-  page.drawText(title, { x: (PAGE_WIDTH - sansBold.widthOfTextAtSize(title, 18)) / 2, y: 625, size: 18, font: sansBold, color: ink });
+  page.drawText(title, { x: (PAGE_WIDTH - sansBold.widthOfTextAtSize(title, 18)) / 2, y: 641, size: 18, font: sansBold, color: ink });
 
   const intro = `Je soussigné(e), Chef de quartier ${elide(quartier)}, certifie que :`;
-  page.drawText(intro, { x: 60, y: 602, size: fitSize(serif, intro, 12, 475), font: serif, color: muted });
+  page.drawText(intro, { x: 60, y: 612, size: fitSize(serif, intro, 12, 475), font: serif, color: muted });
 
   const rows = buildRows(fields);
   const slots = rows.reduce((total, row) => total + row.slots, 0);
@@ -262,29 +261,18 @@ export async function generateCertificate({ request, uploadDir }) {
   const closing = "Le présent certificat est délivré à l’intéressé(e) pour servir et valoir ce que de droit.";
   page.drawText(closing, { x: 60, y: Math.max(y - 8, 232), size: 10.5, font: serif, color: muted });
 
-  const signatureX = 360;
-  const signatureY = 68;
-  page.drawText("LE DÉLÉGUÉ DE QUARTIER", { x: 383, y: 205, size: 10.5, font: sansBold, color: ink });
+  const signatureBox = { x: 355, y: 62, width: 190, height: 128 };
+  page.drawText("LE DÉLÉGUÉ DE QUARTIER", { x: 383, y: 208, size: 10.5, font: sansBold, color: ink });
   if (request.seal_path) {
     // Image unique signature + cachet fournie par l'administrateur.
     const seal = await embedImage(pdf, join(uploadDir, request.seal_path));
-    const size = seal.scaleToFit(190, 130);
+    const size = seal.scaleToFit(signatureBox.width, signatureBox.height);
     page.drawImage(seal, {
-      x: signatureX + (190 - size.width) / 2,
-      y: signatureY + 10,
+      x: signatureBox.x + (signatureBox.width - size.width) / 2,
+      y: signatureBox.y,
       width: size.width,
       height: size.height,
     });
-  } else if (request.certificate_path) {
-    // Repli pour les maisons créées avant le 31/08/2026, qui n'ont encore que
-    // l'ancien modèle PDF : on en recadre la zone signature.
-    const templateBytes = await readFile(join(uploadDir, request.certificate_path));
-    const template = await PDFDocument.load(templateBytes);
-    if (template.getPageCount()) {
-      const source = template.getPages()[0];
-      const crop = await pdf.embedPage(source, { left: 320, bottom: 300, right: 560, top: 500 });
-      page.drawPage(crop, { x: 345, y: 45, width: 210, height: 175 });
-    }
   }
 
   page.drawLine({ start: { x: 52, y: 38 }, end: { x: 543, y: 38 }, thickness: 0.6, color: rule });

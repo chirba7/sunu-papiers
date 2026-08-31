@@ -575,7 +575,6 @@ function CertificateWorkspace() {
           <div className="entry-heading">
             <div>
               <strong>{`RÉGION : ${request.region}\nDÉPARTEMENT : ${request.departement}\nCOMMUNE : ${request.commune}\nQUARTIER : ${request.quartier}`}</strong>
-              <span>Certificat de domicile</span>
             </div>
             <div>
               <span>{request.commune || 'Keur Massar'}, le <b>{today}</b></span>

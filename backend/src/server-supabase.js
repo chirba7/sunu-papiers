@@ -1007,24 +1007,19 @@ app.patch(
           ),
         );
       let certificatePath = r.certificate_path;
+      if (b.status === "approved" && !r.house.seal_path)
+        return fail(
+          res,
+          new Error(
+            "La signature et le cachet de ce quartier ne sont pas encore configurés par l’administrateur.",
+          ),
+        );
       if (b.status === "approved") {
         const dir = await mkdtemp(join(tmpdir(), "sunu-cert-"));
         try {
           await mkdir(dir, { recursive: true });
-          let sealFile = null;
-          let legacyTemplate = null;
-          if (r.house.seal_path) {
-            sealFile = `cachet${extname(r.house.seal_path) || ".png"}`;
-            await downloadHouseAsset(r.house.seal_path, join(dir, sealFile));
-          } else if (r.house.certificate_path) {
-            // Maison créée avant le 31/08/2026 : la zone signature est encore
-            // recadrée depuis l'ancien modèle PDF.
-            legacyTemplate = "modele.pdf";
-            await downloadHouseAsset(
-              r.house.certificate_path,
-              join(dir, legacyTemplate),
-            );
-          }
+          const sealFile = `cachet${extname(r.house.seal_path) || ".png"}`;
+          await downloadHouseAsset(r.house.seal_path, join(dir, sealFile));
           const request = {
             ...r,
             id: r.id,
@@ -1040,7 +1035,6 @@ app.patch(
             certificate_fields: r.house.certificate_fields,
             delegate_sequence: r.delegate_sequence,
             seal_path: sealFile,
-            certificate_path: legacyTemplate,
             birth_date: b.birthDate,
             birth_place: b.birthPlace,
             identity_number: b.identityNumber,
