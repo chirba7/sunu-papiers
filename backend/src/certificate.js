@@ -6,6 +6,105 @@ const ink = rgb(0.08, 0.11, 0.16);
 const muted = rgb(0.34, 0.38, 0.44);
 const rule = rgb(0.82, 0.78, 0.68);
 
+const PAGE_WIDTH = 595.28;
+const PAGE_HEIGHT = 841.89;
+const FIELDS_TOP = 568;
+const FIELDS_BOTTOM = 250;
+const MAX_STEP = 42;
+const MIN_STEP = 30;
+
+// Catalogue des champs imprimables. La maison (houses.certificate_fields) choisit
+// lesquels apparaissent et dans quel ordre ; « parents » est un raccourci pour le
+// couple père / mère. Toute clé inconnue est ignorée silencieusement.
+const CATALOGUE = {
+  birth_date: {
+    group: "birth",
+    label: "Né(e) le",
+    value: (r) => frenchDate(r.birth_date),
+  },
+  birth_place: {
+    group: "birth",
+    label: "à",
+    value: (r) => r.birth_place,
+  },
+  father: {
+    group: "parents",
+    label: "fils/fille de",
+    bold: true,
+    value: (r) =>
+      `${r.father_first_name || ""} ${r.father_last_name || ""}`.trim(),
+  },
+  mother: {
+    group: "parents",
+    label: "et de",
+    bold: true,
+    value: (r) =>
+      `${r.mother_first_name || ""} ${r.mother_last_name || ""}`.trim(),
+  },
+  identity_type: {
+    label: "Pièce d’identité présentée :",
+    bold: true,
+    value: () => "Carte nationale d’identité",
+  },
+  identity_number: {
+    label: "N°",
+    value: (r) => r.identity_number,
+    maxWidth: 300,
+  },
+  address: { block: true },
+  resident_since: {
+    group: "residence",
+    label: "Dans le quartier depuis",
+    bold: true,
+    value: (r) => r.resident_since_year,
+  },
+  lot_number: {
+    group: "residence",
+    label: "Lot N°",
+    value: (r) => r.lot_number || "N/A",
+  },
+};
+
+const PAIR_LAYOUT = {
+  birth: { left: { x: 60, maxWidth: 205 }, right: { x: 285, maxWidth: 250 } },
+  parents: { left: { x: 60, maxWidth: 245 }, right: { x: 320, maxWidth: 215 } },
+  residence: { left: { x: 60, maxWidth: 285 }, right: { x: 375, maxWidth: 160 } },
+};
+
+export const DEFAULT_CERTIFICATE_FIELDS = [
+  "birth_date",
+  "birth_place",
+  "identity_type",
+  "identity_number",
+  "address",
+  "resident_since",
+  "lot_number",
+];
+
+export function normalizeFields(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? safeParse(value)
+      : null;
+  if (!Array.isArray(raw) || !raw.length) return [...DEFAULT_CERTIFICATE_FIELDS];
+  const expanded = [];
+  for (const entry of raw) {
+    const key = String(entry || "").trim();
+    if (key === "parents") expanded.push("father", "mother");
+    else if (CATALOGUE[key]) expanded.push(key);
+  }
+  return expanded.filter((key, index) => expanded.indexOf(key) === index);
+}
+
+function safeParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 async function embedImage(pdf, path) {
   const bytes = await readFile(path);
   return /\.png$/i.test(extname(path)) ? pdf.embedPng(bytes) : pdf.embedJpg(bytes);
@@ -39,6 +138,13 @@ function wrap(font, text, size, maxWidth) {
   return lines;
 }
 
+// « de Grand-Yoff » mais « d’Aïnoumady 03 ».
+function elide(name) {
+  const label = String(name || "").trim();
+  if (!label) return "de quartier";
+  return /^[AEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜaeiouy]/.test(label) ? `d’${label}` : `de ${label}`;
+}
+
 function fieldLine(page, labelFont, valueFont, label, value, y, options = {}) {
   const x = options.x || 60;
   const maxWidth = options.maxWidth || 475;
@@ -47,20 +153,45 @@ function fieldLine(page, labelFont, valueFont, label, value, y, options = {}) {
   const labelWidth = labelFont.widthOfTextAtSize(label, labelSize);
   const valueX = x + labelWidth + 8;
   const available = maxWidth - labelWidth - 8;
-  const shown = String(value || "Non renseigné").trim();
+  const shown = String(value || "Non renseigné").trim() || "Non renseigné";
   const size = fitSize(valueFont, shown, options.valueSize || 13, available);
   page.drawText(shown, { x: valueX, y, size, font: valueFont, color: ink });
   page.drawLine({ start: { x: valueX, y: y - 4 }, end: { x: x + maxWidth, y: y - 4 }, thickness: 0.7, color: muted });
 }
 
-export async function generateCertificate({ request, uploadDir }) {
-  if (!request.certificate_path)
-    throw new Error("Le modèle du certificat doit être configuré pour cette maison.");
+// Regroupe les champs déclarés en lignes : deux champs d'un même groupe qui se
+// suivent partagent une ligne, l'adresse occupe la hauteur de deux lignes.
+function buildRows(fields) {
+  const rows = [{ type: "name", slots: 1 }];
+  let index = 0;
+  while (index < fields.length) {
+    const key = fields[index];
+    const spec = CATALOGUE[key];
+    if (!spec) {
+      index += 1;
+      continue;
+    }
+    if (spec.block) {
+      rows.push({ type: "address", slots: 2 });
+      index += 1;
+      continue;
+    }
+    const next = fields[index + 1];
+    if (spec.group && next && CATALOGUE[next]?.group === spec.group) {
+      rows.push({ type: "pair", group: spec.group, left: key, right: next, slots: 1 });
+      index += 2;
+      continue;
+    }
+    rows.push({ type: "single", key, slots: 1 });
+    index += 1;
+  }
+  return rows;
+}
 
-  const templateBytes = await readFile(join(uploadDir, request.certificate_path));
-  const template = await PDFDocument.load(templateBytes);
+export async function generateCertificate({ request, uploadDir }) {
+  const fields = normalizeFields(request.certificate_fields);
   const pdf = await PDFDocument.create();
-  const page = pdf.addPage([595.28, 841.89]);
+  const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   const sans = await pdf.embedFont(StandardFonts.Helvetica);
   const sansBold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const serif = await pdf.embedFont(StandardFonts.TimesRoman);
@@ -71,9 +202,11 @@ export async function generateCertificate({ request, uploadDir }) {
   const commune = request.commune || house.commune || "";
   const quartier = request.quartier || house.quartier || "";
   const today = new Intl.DateTimeFormat("fr-FR", { timeZone: "Africa/Dakar", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
-  const dossierNumber = String(request.id || request.reference?.split("-").pop() || "").padStart(4, "0");
+  const dossierNumber = String(
+    request.delegate_sequence || request.reference?.split("-").pop() || "",
+  ).padStart(3, "0");
 
-  page.drawRectangle({ x: 0, y: 0, width: 595.28, height: 841.89, color: rgb(0.995, 0.992, 0.982) });
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: rgb(0.995, 0.992, 0.982) });
   const header = [
     `RÉGION : ${region}`,
     `DÉPARTEMENT : ${departement}`,
@@ -87,45 +220,71 @@ export async function generateCertificate({ request, uploadDir }) {
   page.drawLine({ start: { x: 52, y: 676 }, end: { x: 543, y: 676 }, thickness: 0.8, color: rule });
 
   const title = "CERTIFICAT DE DOMICILE";
-  page.drawText(title, { x: (595.28 - sansBold.widthOfTextAtSize(title, 18)) / 2, y: 625, size: 18, font: sansBold, color: ink });
+  page.drawText(title, { x: (PAGE_WIDTH - sansBold.widthOfTextAtSize(title, 18)) / 2, y: 625, size: 18, font: sansBold, color: ink });
 
-  fieldLine(page, serif, serifBold, "Mr/Mme/Mlle", `${request.firstName} ${request.lastName}`, 568);
-  fieldLine(page, serif, serif, "Né(e) le", frenchDate(request.birth_date), 526, { maxWidth: 205 });
-  fieldLine(page, serif, serif, "à", request.birth_place, 526, { x: 285, maxWidth: 250 });
-  fieldLine(page, serif, serifBold, "fils/fille de", `${request.father_first_name || ""} ${request.father_last_name || ""}`, 484, { maxWidth: 245 });
-  fieldLine(page, serif, serifBold, "et de", `${request.mother_first_name || ""} ${request.mother_last_name || ""}`, 484, { x: 320, maxWidth: 215 });
-  fieldLine(page, serif, serifBold, "Pièce d’identité présentée :", "Carte nationale d’identité", 442);
-  fieldLine(page, serif, serif, "N°", request.identity_number, 400, { maxWidth: 300 });
+  const intro = `Je soussigné(e), Chef de quartier ${elide(quartier)}, certifie que :`;
+  page.drawText(intro, { x: 60, y: 602, size: fitSize(serif, intro, 12, 475), font: serif, color: muted });
 
-  page.drawText("Est domicilié(e) à :", { x: 60, y: 354, size: 13, font: serif, color: ink });
-  const address = String(request.address || quartier || "Non renseignée").trim();
-  const addressLines = wrap(serifBold, address, 13, 450);
-  addressLines.slice(0, 2).forEach((line, index) => {
-    page.drawText(line, { x: 60, y: 328 - index * 21, size: 13, font: serifBold, color: ink });
-    page.drawLine({ start: { x: 60, y: 323 - index * 21 }, end: { x: 535, y: 323 - index * 21 }, thickness: 0.7, color: muted });
-  });
-  const residenceY = addressLines.length > 1 ? 277 : 298;
-  fieldLine(page, serif, serifBold, "Dans le quartier depuis", request.resident_since_year, residenceY, { maxWidth: 285 });
-  fieldLine(page, serif, serif, "Lot N°", request.lot_number || "N/A", residenceY, { x: 375, maxWidth: 160 });
+  const rows = buildRows(fields);
+  const slots = rows.reduce((total, row) => total + row.slots, 0);
+  const step = Math.max(
+    MIN_STEP,
+    Math.min(MAX_STEP, Math.floor((FIELDS_TOP - FIELDS_BOTTOM) / Math.max(slots, 1))),
+  );
 
-  page.drawText("Le présent certificat est délivré à l’intéressé(e) pour servir et valoir ce que de droit.", { x: 60, y: residenceY - 43, size: 10.5, font: serif, color: muted });
+  let y = FIELDS_TOP;
+  for (const row of rows) {
+    if (row.type === "name") {
+      fieldLine(page, serif, serifBold, "Mr/Mme/Mlle", `${request.firstName} ${request.lastName}`, y);
+    } else if (row.type === "pair") {
+      const layout = PAIR_LAYOUT[row.group] || {
+        left: { x: 60, maxWidth: 230 },
+        right: { x: 305, maxWidth: 230 },
+      };
+      drawField(page, serif, serifBold, row.left, request, y, layout.left);
+      drawField(page, serif, serifBold, row.right, request, y, layout.right);
+    } else if (row.type === "single") {
+      const spec = CATALOGUE[row.key];
+      drawField(page, serif, serifBold, row.key, request, y, { x: 60, maxWidth: spec.maxWidth || 475 });
+    } else if (row.type === "address") {
+      const address = String(request.address || quartier || "Non renseignée").trim();
+      page.drawText("Est domicilié(e) à :", { x: 60, y, size: 13, font: serif, color: ink });
+      const lines = wrap(serifBold, address, 13, 450).slice(0, 2);
+      lines.forEach((line, index) => {
+        const lineY = y - 26 - index * 21;
+        page.drawText(line, { x: 60, y: lineY, size: 13, font: serifBold, color: ink });
+        page.drawLine({ start: { x: 60, y: lineY - 5 }, end: { x: 535, y: lineY - 5 }, thickness: 0.7, color: muted });
+      });
+    }
+    y -= step * row.slots;
+  }
+
+  const closing = "Le présent certificat est délivré à l’intéressé(e) pour servir et valoir ce que de droit.";
+  page.drawText(closing, { x: 60, y: Math.max(y - 8, 232), size: 10.5, font: serif, color: muted });
 
   const signatureX = 360;
   const signatureY = 68;
   page.drawText("LE DÉLÉGUÉ DE QUARTIER", { x: 383, y: 205, size: 10.5, font: sansBold, color: ink });
-  if (request.signature_path) {
-    const signature = await embedImage(pdf, join(uploadDir, request.signature_path));
-    const size = signature.scaleToFit(145, 95);
-    page.drawImage(signature, { x: signatureX, y: signatureY + 20, width: size.width, height: size.height });
-  }
-  if (request.stamp_path) {
-    const stamp = await embedImage(pdf, join(uploadDir, request.stamp_path));
-    const size = stamp.scaleToFit(105, 105);
-    page.drawImage(stamp, { x: signatureX + 62, y: signatureY + 13, width: size.width, height: size.height, opacity: 0.86 });
-  } else if (!request.signature_path && template.getPageCount()) {
-    const source = template.getPages()[0];
-    const crop = await pdf.embedPage(source, { left: 320, bottom: 300, right: 560, top: 500 });
-    page.drawPage(crop, { x: 345, y: 45, width: 210, height: 175 });
+  if (request.seal_path) {
+    // Image unique signature + cachet fournie par l'administrateur.
+    const seal = await embedImage(pdf, join(uploadDir, request.seal_path));
+    const size = seal.scaleToFit(190, 130);
+    page.drawImage(seal, {
+      x: signatureX + (190 - size.width) / 2,
+      y: signatureY + 10,
+      width: size.width,
+      height: size.height,
+    });
+  } else if (request.certificate_path) {
+    // Repli pour les maisons créées avant le 31/08/2026, qui n'ont encore que
+    // l'ancien modèle PDF : on en recadre la zone signature.
+    const templateBytes = await readFile(join(uploadDir, request.certificate_path));
+    const template = await PDFDocument.load(templateBytes);
+    if (template.getPageCount()) {
+      const source = template.getPages()[0];
+      const crop = await pdf.embedPage(source, { left: 320, bottom: 300, right: 560, top: 500 });
+      page.drawPage(crop, { x: 345, y: 45, width: 210, height: 175 });
+    }
   }
 
   page.drawLine({ start: { x: 52, y: 38 }, end: { x: 543, y: 38 }, thickness: 0.6, color: rule });
@@ -138,4 +297,18 @@ export async function generateCertificate({ request, uploadDir }) {
   const filename = `certificat-${request.reference}.pdf`;
   await writeFile(join(uploadDir, filename), await pdf.save());
   return filename;
+}
+
+function drawField(page, labelFont, boldFont, key, request, y, geometry) {
+  const spec = CATALOGUE[key];
+  if (!spec) return;
+  fieldLine(
+    page,
+    labelFont,
+    spec.bold ? boldFont : labelFont,
+    spec.label,
+    spec.value(request),
+    y,
+    geometry,
+  );
 }

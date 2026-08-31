@@ -8,3 +8,16 @@
 .edit-modal{width:min(100%,650px);max-height:90vh;overflow:auto}.house-edit-modal{width:min(100%,760px)}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.modal-actions .primary-button,.modal-actions .secondary-button{width:auto}
 .house-layout>.form-panel>.uploads>.upload-field:nth-child(n+2){display:none}
 .house-layout>.form-panel .form-grid input{text-transform:uppercase}
+
+/* v3 — la maison déclare les champs du certificat au lieu d'importer un modèle PDF */
+.field-picker { display: grid; gap: 6px; margin: 4px 0 2px; }
+.field-picker > strong { font-size: 12px; font-weight: 800; }
+.field-picker > p { margin: 0; font-size: 11.5px; color: #6b7480; }
+.field-picker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 4px; }
+.field-picker-grid label {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px;
+  font-size: 12.5px; cursor: pointer; background: #fff; transition: border-color .15s, background .15s;
+}
+.field-picker-grid label.on { border-color: var(--brand); background: #f2f7ff; font-weight: 700; }
+.field-picker-grid input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }

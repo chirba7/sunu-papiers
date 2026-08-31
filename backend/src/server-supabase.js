@@ -10,7 +10,11 @@ import {
   supabasePublic,
   requireSupabaseConfig,
 } from "./supabase.js";
-import { generateCertificate } from "./certificate.js";
+import {
+  DEFAULT_CERTIFICATE_FIELDS,
+  generateCertificate,
+  normalizeFields,
+} from "./certificate.js";
 
 requireSupabaseConfig();
 const app = express(),
@@ -69,7 +73,37 @@ const files = upload.fields([
   { name: "certificate", maxCount: 1 },
   { name: "signature", maxCount: 1 },
   { name: "stamp", maxCount: 1 },
+  { name: "seal", maxCount: 1 },
 ]);
+
+// L'administrateur importe une seule image contenant signature et cachet.
+const sealExtension = (file) =>
+  file.mimetype === "image/png" ? "png" : "jpg";
+const uploadSeal = async (houseId, file) => {
+  const path = `${houseId}/cachet.${sealExtension(file)}`;
+  const { error } = await supabaseAdmin.storage
+    .from("house-templates")
+    .upload(path, file.buffer, { contentType: file.mimetype, upsert: true });
+  if (error) throw error;
+  return `house-templates/${path}`;
+};
+const downloadHouseAsset = async (storagePath, destination) => {
+  const { data, error } = await supabaseAdmin.storage
+    .from("house-templates")
+    .download(storagePath.replace(/^house-templates\//, ""));
+  if (error) throw error;
+  await writeFile(destination, Buffer.from(await data.arrayBuffer()));
+};
+// Le formulaire envoie les champs du certificat en JSON dans un FormData.
+const parseFields = (raw) => {
+  if (raw === undefined || raw === null || raw === "") return null;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch {
+    return null;
+  }
+};
 // --- Cache memoire du compteur de demandes ---------------------------------
 // Evite de recalculer les compteurs a chaque sondage du front (toutes les 20 s).
 // Cle = identifiant du delegue. TTL court : une nouvelle demande est visible
@@ -646,15 +680,20 @@ app.post(
         ]);
       if (m.length)
         return fail(res, new Error("Localisation et délégué requis."));
-      if (!req.files?.certificate?.[0])
-        return fail(res, new Error("Le modèle PDF est obligatoire."));
+      if (!req.files?.seal?.[0])
+        return fail(
+          res,
+          new Error("L’image de la signature et du cachet est obligatoire."),
+        );
       const values = {
         region: b.region.toUpperCase(),
         departement: b.departement.toUpperCase(),
         commune: b.commune.toUpperCase(),
         quartier: b.quartier.toUpperCase(),
         delegate_id: b.delegateId,
-        certificate_path: "pending",
+        certificate_fields: parseFields(b.fields) || DEFAULT_CERTIFICATE_FIELDS,
+        certificate_path: null,
+        seal_path: null,
         active: true,
       };
       let { data: house, error } = await supabaseAdmin
@@ -681,17 +720,10 @@ app.post(
         }
       }
       if (error) throw error;
-      const path = `${house.id}/modele.pdf`;
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("house-templates")
-        .upload(path, req.files.certificate[0].buffer, {
-          contentType: "application/pdf",
-          upsert: true,
-        });
-      if (uploadError) throw uploadError;
+      const sealPath = await uploadSeal(house.id, req.files.seal[0]);
       await supabaseAdmin
         .from("houses")
-        .update({ certificate_path: `house-templates/${path}` })
+        .update({ seal_path: sealPath })
         .eq("id", house.id);
       res.status(201).json({ id: house.id });
     } catch (error) {
@@ -714,17 +746,10 @@ app.put(
           quartier: b.quartier.toUpperCase(),
           delegate_id: b.delegateId,
         };
-      if (req.files?.certificate?.[0]) {
-        const path = `${req.params.id}/modele.pdf`;
-        const { error } = await supabaseAdmin.storage
-          .from("house-templates")
-          .upload(path, req.files.certificate[0].buffer, {
-            contentType: "application/pdf",
-            upsert: true,
-          });
-        if (error) throw error;
-        changes.certificate_path = `house-templates/${path}`;
-      }
+      const fields = parseFields(b.fields);
+      if (fields) changes.certificate_fields = fields;
+      if (req.files?.seal?.[0])
+        changes.seal_path = await uploadSeal(req.params.id, req.files.seal[0]);
       const { error } = await supabaseAdmin
         .from("houses")
         .update(changes)
@@ -908,7 +933,8 @@ app.get(
           departement: r.house.departement,
           commune: r.house.commune,
           quartier: r.house.quartier,
-          templatePath: r.house.certificate_path,
+          delegateSequence: r.delegate_sequence,
+          certificateFields: normalizeFields(r.house.certificate_fields),
         };
       }),
     );
@@ -982,21 +1008,23 @@ app.patch(
         );
       let certificatePath = r.certificate_path;
       if (b.status === "approved") {
-        const modelRef = r.house.certificate_path.replace(
-          /^house-templates\//,
-          "",
-        );
-        const { data: model, error: dError } = await supabaseAdmin.storage
-          .from("house-templates")
-          .download(modelRef);
-        if (dError) throw dError;
         const dir = await mkdtemp(join(tmpdir(), "sunu-cert-"));
         try {
           await mkdir(dir, { recursive: true });
-          await writeFile(
-            join(dir, "modele.pdf"),
-            Buffer.from(await model.arrayBuffer()),
-          );
+          let sealFile = null;
+          let legacyTemplate = null;
+          if (r.house.seal_path) {
+            sealFile = `cachet${extname(r.house.seal_path) || ".png"}`;
+            await downloadHouseAsset(r.house.seal_path, join(dir, sealFile));
+          } else if (r.house.certificate_path) {
+            // Maison créée avant le 31/08/2026 : la zone signature est encore
+            // recadrée depuis l'ancien modèle PDF.
+            legacyTemplate = "modele.pdf";
+            await downloadHouseAsset(
+              r.house.certificate_path,
+              join(dir, legacyTemplate),
+            );
+          }
           const request = {
             ...r,
             id: r.id,
@@ -1009,9 +1037,10 @@ app.patch(
             mother_first_name: r.citizen_profile.mother_first_name,
             mother_last_name: r.citizen_profile.mother_last_name,
             resident_since_year: r.citizen_profile.resident_since_year,
-            certificate_path: "modele.pdf",
-            signature_path: null,
-            stamp_path: null,
+            certificate_fields: r.house.certificate_fields,
+            delegate_sequence: r.delegate_sequence,
+            seal_path: sealFile,
+            certificate_path: legacyTemplate,
             birth_date: b.birthDate,
             birth_place: b.birthPlace,
             identity_number: b.identityNumber,

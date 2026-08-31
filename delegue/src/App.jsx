@@ -41,6 +41,81 @@ const REJECT_REASONS = [
 const dateFR = (value) =>
   value ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(value)) : ''
 
+// Champs du certificat : la maison décide lesquels apparaissent (houses.certificate_fields).
+// Ce catalogue doit rester aligné sur celui de backend/src/certificate.js.
+const DEFAULT_FIELDS = ['birth_date', 'birth_place', 'identity_type', 'identity_number', 'address', 'resident_since', 'lot_number']
+const FIELD_GROUP = { birth_date: 'birth', birth_place: 'birth', father: 'parents', mother: 'parents', resident_since: 'residence', lot_number: 'residence' }
+
+const expandFields = (fields) => {
+  const list = Array.isArray(fields) && fields.length ? fields : DEFAULT_FIELDS
+  const expanded = []
+  list.forEach((key) => {
+    if (key === 'parents') expanded.push('father', 'mother')
+    else expanded.push(key)
+  })
+  return expanded.filter((key, index) => expanded.indexOf(key) === index)
+}
+
+const certValue = (text, fallback) => <span className="cert-value">{text || fallback}</span>
+
+// Regroupe les champs en lignes, comme le fait la mise en page du PDF.
+function certificateLines(fields, request, form) {
+  const list = expandFields(fields)
+  const lines = [<p key="name">Mr/Mme/Mlle <strong>{request.firstName} {request.lastName}</strong></p>]
+  let index = 0
+  while (index < list.length) {
+    const key = list[index]
+    const next = list[index + 1]
+    const paired = FIELD_GROUP[key] && next && FIELD_GROUP[next] === FIELD_GROUP[key]
+    if (paired) index += 1
+    index += 1
+    if (paired && FIELD_GROUP[key] === 'birth')
+      lines.push(<p key="birth">Né(e) le {certValue(dateFR(form.birthDate), 'non renseignée')} à {certValue(form.birthPlace, 'non renseigné')},</p>)
+    else if (paired && FIELD_GROUP[key] === 'parents')
+      lines.push(<p key="parents">fils/fille de <strong>{request.father || 'Non renseigné'}</strong> et de <strong>{request.mother || 'Non renseigné'}</strong>,</p>)
+    else if (paired && FIELD_GROUP[key] === 'residence')
+      lines.push(
+        <p key="residence">
+          dans le quartier depuis <strong className={request.residentSinceYear ? '' : 'missing-value'}>{request.residentSinceYear || 'année non renseignée'}</strong>,
+          {' '}villa N° <span className="cert-value cert-value-short">{form.lotNumber || '—'}</span>.
+        </p>,
+      )
+    else if (key === 'birth_date')
+      lines.push(<p key="birth_date">Né(e) le {certValue(dateFR(form.birthDate), 'non renseignée')},</p>)
+    else if (key === 'birth_place')
+      lines.push(<p key="birth_place">Né(e) à {certValue(form.birthPlace, 'non renseigné')},</p>)
+    else if (key === 'father')
+      lines.push(<p key="father">fils/fille de <strong>{request.father || 'Non renseigné'}</strong>,</p>)
+    else if (key === 'mother')
+      lines.push(<p key="mother">fils/fille de <strong>{request.mother || 'Non renseigné'}</strong>,</p>)
+    else if (key === 'identity_type')
+      lines.push(<p key="identity_type">pièce d’identité présentée : <strong>Carte nationale d’identité</strong></p>)
+    else if (key === 'identity_number')
+      lines.push(<p key="identity_number">N° {certValue(form.identityNumber, 'non renseigné')}</p>)
+    else if (key === 'address')
+      lines.push(<p key="address" className="cert-address">est domicilié(e) à <span className="cert-value cert-value-block">{form.address || 'non renseignée'}</span></p>)
+    else if (key === 'resident_since')
+      lines.push(<p key="resident_since">dans le quartier depuis <strong className={request.residentSinceYear ? '' : 'missing-value'}>{request.residentSinceYear || 'année non renseignée'}</strong>.</p>)
+    else if (key === 'lot_number')
+      lines.push(<p key="lot_number">villa N° <span className="cert-value cert-value-short">{form.lotNumber || '—'}</span>.</p>)
+  }
+  return lines
+}
+
+// Ne réclame que les informations réellement imprimées sur ce certificat.
+function missingValues(fields, request, form) {
+  const list = expandFields(fields)
+  const checks = {
+    birth_date: [form.birthDate, 'la date de naissance'],
+    birth_place: [form.birthPlace, 'le lieu de naissance'],
+    identity_number: [form.identityNumber, 'le numéro de CNI'],
+    address: [form.address, 'l’adresse'],
+    resident_since: [request.residentSinceYear, 'l’année de domiciliation'],
+    lot_number: [form.lotNumber, 'le numéro de villa'],
+  }
+  return list.filter((key) => checks[key] && !checks[key][0]).map((key) => checks[key][1])
+}
+
 const dateTimeFR = (value) =>
   value
     ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
@@ -443,14 +518,14 @@ function CertificateWorkspace() {
 
   const treated = request.status === 'approved' || request.status === 'rejected'
   const today = dateFR(new Date())
-  const number = String(request.id).padStart(4, '0')
+  const fields = request.certificateFields
+  const number = String(request.delegateSequence || '').padStart(3, '0')
 
   const approve = async (e) => {
     e.preventDefault()
-    if (!form.birthDate || !form.birthPlace || !form.identityNumber || !form.address)
-      return setToast({ tone: 'bad', message: 'Date, lieu de naissance, numéro CNI et adresse sont obligatoires.' })
-    if (!request.residentSinceYear)
-      return setToast({ tone: 'bad', message: 'Le citoyen doit renseigner son année de domiciliation dans Mon compte.' })
+    const missing = missingValues(fields, request, form)
+    if (missing.length)
+      return setToast({ tone: 'bad', message: `Informations manquantes : ${missing.join(', ')}.` })
     setSaving(true)
     try {
       await api(`/delegate/requests/${id}`, { method: 'PATCH', body: JSON.stringify({ ...form, status: 'approved' }) })
@@ -488,13 +563,6 @@ function CertificateWorkspace() {
       <div className="entry-workspace">
         <div className="entry-references">
           <article className="panel">
-            <div className="panel-head">
-              <div><span>Modèle officiel</span><h3>Certificat de domicile</h3></div>
-              <a href={uploadUrl(request.templatePath)} target="_blank" rel="noreferrer">Ouvrir</a>
-            </div>
-            <iframe className="compact-template" src={uploadUrl(request.templatePath)} title="Modèle du certificat" />
-          </article>
-          <article className="panel">
             <div className="panel-head"><div><span>Justificatifs</span><h3>Carte d’identité</h3></div></div>
             <div className="id-grid">
               <IdentityPreview side="Recto" src={request.idFront} />
@@ -517,18 +585,9 @@ function CertificateWorkspace() {
 
           <h3>CERTIFICAT DE DOMICILE</h3>
 
-          <div className="certificate-sentence">
-            <p>Mr/Mme/Mlle <strong>{request.firstName} {request.lastName}</strong></p>
-            <p>Né(e) le <span className="cert-value">{dateFR(form.birthDate) || 'non renseignée'}</span> à <span className="cert-value">{form.birthPlace || 'non renseigné'}</span>,</p>
-            <p>fils/fille de <strong>{request.father || 'Non renseigné'}</strong> et de <strong>{request.mother || 'Non renseigné'}</strong>,</p>
-            <p>pièce d’identité présentée : <strong>Carte nationale d’identité</strong></p>
-            <p>N° <span className="cert-value">{form.identityNumber || 'non renseigné'}</span></p>
-            <p className="cert-address">est domicilié(e) à <span className="cert-value cert-value-block">{form.address || 'non renseignée'}</span></p>
-            <p>
-              dans le quartier depuis <strong className={request.residentSinceYear ? '' : 'missing-value'}>{request.residentSinceYear || 'année non renseignée'}</strong>,
-              {' '}villa N° <span className="cert-value cert-value-short">{form.lotNumber || '—'}</span>.
-            </p>
-          </div>
+          <p className="cert-intro">Je soussigné(e), Chef de quartier de {request.quartier}, certifie que :</p>
+
+          <div className="certificate-sentence">{certificateLines(fields, request, form)}</div>
 
           <div className="entry-check">
             <CheckCircle2 size={18} />
