@@ -748,8 +748,22 @@ app.put(
         };
       const fields = parseFields(b.fields);
       if (fields) changes.certificate_fields = fields;
-      if (req.files?.seal?.[0])
+      if (req.files?.seal?.[0]) {
         changes.seal_path = await uploadSeal(req.params.id, req.files.seal[0]);
+      } else {
+        const { data: current } = await supabaseAdmin
+          .from("houses")
+          .select("seal_path")
+          .eq("id", req.params.id)
+          .maybeSingle();
+        if (!current?.seal_path)
+          return fail(
+            res,
+            new Error(
+              "Aucune image de signature et de cachet n’a été reçue. Si le formulaire vous en propose une, votre interface d’administration n’est pas à jour : redéployez-la.",
+            ),
+          );
+      }
       const { error } = await supabaseAdmin
         .from("houses")
         .update(changes)
