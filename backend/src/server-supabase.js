@@ -77,10 +77,15 @@ const files = upload.fields([
 ]);
 
 // L'administrateur importe une seule image contenant signature et cachet.
-const sealExtension = (file) =>
-  file.mimetype === "image/png" ? "png" : "jpg";
+const SEAL_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg" };
 const uploadSeal = async (houseId, file) => {
-  const path = `${houseId}/cachet.${sealExtension(file)}`;
+  // pdf-lib n'embarque que du PNG et du JPEG.
+  const extension = SEAL_TYPES[file.mimetype];
+  if (!extension)
+    throw new Error(
+      `Format d’image non pris en charge (${file.mimetype}). Utilisez un PNG ou un JPEG.`,
+    );
+  const path = `${houseId}/cachet.${extension}`;
   const { error } = await supabaseAdmin.storage
     .from("house-templates")
     .upload(path, file.buffer, { contentType: file.mimetype, upsert: true });
@@ -93,6 +98,13 @@ const downloadHouseAsset = async (storagePath, destination) => {
     .download(storagePath.replace(/^house-templates\//, ""));
   if (error) throw error;
   await writeFile(destination, Buffer.from(await data.arrayBuffer()));
+};
+// Décrit ce que la requête a réellement apporté, pour que le message d'erreur
+// soit exploitable sans accès aux logs.
+const describeUpload = (req) => {
+  const texte = Object.keys(req.body || {}).join(", ") || "aucun";
+  const fichiers = Object.keys(req.files || {}).join(", ") || "aucun";
+  return `champs texte reçus : ${texte} · fichiers reçus : ${fichiers}`;
 };
 // Le formulaire envoie les champs du certificat en JSON dans un FormData.
 const parseFields = (raw) => {
@@ -683,7 +695,9 @@ app.post(
       if (!req.files?.seal?.[0])
         return fail(
           res,
-          new Error("L’image de la signature et du cachet est obligatoire."),
+          new Error(
+            `L’image de la signature et du cachet est obligatoire — ${describeUpload(req)}.`,
+          ),
         );
       const values = {
         region: b.region.toUpperCase(),
@@ -760,7 +774,7 @@ app.put(
           return fail(
             res,
             new Error(
-              "Aucune image de signature et de cachet n’a été reçue. Si le formulaire vous en propose une, votre interface d’administration n’est pas à jour : redéployez-la.",
+              `Aucune image de signature et de cachet n’a été reçue — ${describeUpload(req)}.`,
             ),
           );
       }

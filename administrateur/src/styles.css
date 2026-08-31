@@ -21,3 +21,5 @@
 }
 .field-picker-grid label.on { border-color: var(--brand); background: #f2f7ff; font-weight: 700; }
 .field-picker-grid input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
+.toast.tone-bad { background: #7f231a; }
+.toast.tone-bad span { color: #f6d4d0; }
