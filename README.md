@@ -40,6 +40,35 @@ Principales routes :
 - `GET|POST /api/admin/delegates` et `GET|POST /api/admin/houses`
 - `GET /api/houses`, `POST /api/requests`, `GET /api/requests/mine`
 - `GET /api/delegate/requests` et `PATCH /api/delegate/requests/:id`
+- `POST /api/payments` — paiement simulé (Wave / Orange Money) d'un certificat approuvé
+- `GET /api/delegate/revenue` et `GET /api/admin/revenue` — recettes par jour, semaine et mois
+
+## Paiement des documents
+
+Le prix d'un document est fixé par l'administrateur au moment de la création de
+la maison de chef de quartier (champ « Prix du certificat », `houses.document_price`).
+Le citoyen ne paie rien pour déposer sa demande : le paiement intervient dans
+« Mes papiers », quand il veut consulter le certificat que le délégué a approuvé.
+
+Le paiement est **simulé** : aucun opérateur n'est appelé, mais le montant vient
+toujours du prix enregistré en base, jamais du client. Une fois réglé, le
+certificat reste accessible sans repayer (`payments.request_id` est unique).
+
+La recette est encaissée par l'administration puis reversée :
+
+| Part | Défaut | Variable |
+| --- | --- | --- |
+| Délégué du quartier | 90 % | `DELEGATE_SHARE_PERCENT` |
+| Administration | 10 % | — |
+
+Les deux parts sont figées dans la ligne de paiement : changer le taux plus tard
+ne réécrit pas l'historique. L'administrateur voit le total encaissé, sa part et
+la part due à chaque délégué (page « Recettes ») ; le délégué voit uniquement sa
+part (page « Mes recettes »). Les reversements ne sont pas tracés : les deux
+écrans sont en lecture seule.
+
+Les logos des opérateurs sont dans `*/public/operateurs/` — ce sont des
+placeholders, à remplacer par les vrais fichiers en gardant les mêmes noms.
 
 Envoyez le jeton reçu à la connexion dans l'en-tête `Authorization: Bearer <token>`.
 

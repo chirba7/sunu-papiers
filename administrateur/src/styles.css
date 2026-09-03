@@ -23,3 +23,33 @@
 .field-picker-grid input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
 .toast.tone-bad { background: #7f231a; }
 .toast.tone-bad span { color: #f6d4d0; }
+
+/* ------------------------------------------------------------------ recettes */
+.period-tabs{display:inline-flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:14px;background:#fff;margin-bottom:18px}
+.period-tabs button{border:0;background:transparent;height:38px;padding:0 16px;border-radius:10px;font-weight:700;font-size:13px;color:#6b6e75}
+.period-tabs button.on{background:var(--brand-soft);color:var(--brand)}
+.revenue-stats .stat-card strong{font-size:22px;letter-spacing:-.6px}
+.revenue-grid{margin-bottom:18px}
+.revenue-bars{display:grid;gap:12px}
+.revenue-bar{display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:12px}
+.revenue-bar-label{font-size:12px;color:#7a7d84;text-transform:capitalize}
+.revenue-bar-track{height:8px;border-radius:999px;background:#f0f0f1;overflow:hidden}
+.revenue-bar-track i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--brand-dark),var(--brand2))}
+.revenue-bar strong{font-size:12.5px;white-space:nowrap}
+.split-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:9px 0}
+.split-row span{font-size:13px;color:#696c72}
+.split-row strong{font-family:'Manrope';font-size:16px}
+.split-bar{height:10px;border-radius:999px;background:#f0f0f1;overflow:hidden;margin-bottom:4px}
+.split-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--brand-dark),var(--brand2))}
+.revenue-link{margin-top:16px;width:100%}
+.revenue-table-panel{margin-top:18px}
+.revenue-table-wrap{overflow-x:auto}
+.revenue-table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
+.revenue-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#9b9da3;padding:0 12px 10px;white-space:nowrap}
+.revenue-table td{padding:12px;border-top:1px solid #f0f0f1;color:#5f636a;white-space:nowrap}
+.revenue-table td strong{color:var(--ink)}
+.revenue-total{font-weight:800;color:var(--ink)!important}
+.provider-chip{display:inline-block;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.provider-chip.wave{background:#e2f8fe;color:#0b6b85}
+.provider-chip.orange_money{background:#fff0e2;color:#a34d00}
+@media(max-width:560px){.period-tabs{display:grid;grid-template-columns:1fr 1fr 1fr;width:100%}.period-tabs button{padding:0 8px;font-size:12px}.revenue-bar{grid-template-columns:1fr;gap:4px}}

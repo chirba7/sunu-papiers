@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import {
   AlertTriangle, ArrowRight, Ban, CheckCircle2, ChevronRight, ClipboardCheck, Eye, EyeOff,
   FileCheck2, FileText, Home, IdCard, LockKeyhole, LogOut, Mail, MapPin, Menu, SearchCheck,
-  Send, ShieldCheck, Sparkles, UserRound, Users, X, XCircle
+  PiggyBank, Receipt, Send, ShieldCheck, Sparkles, UserRound, Users, Wallet, X, XCircle
 } from 'lucide-react'
 import { api, isLoggedIn, login, logout as apiLogout, uploadUrl } from './api.js'
 import {
@@ -237,6 +237,7 @@ function Login() {
 const NAV = [
   { path: '/dashboard', label: 'Dashboard', icon: Home },
   { path: '/demandes', label: 'Demandes reçues', icon: ClipboardCheck, badge: true },
+  { path: '/recettes', label: 'Mes recettes', icon: Wallet },
   { path: '/profil', label: 'Mes informations', icon: UserRound },
 ]
 
@@ -620,6 +621,100 @@ function CertificateWorkspace() {
   )
 }
 
+/* ------------------------------------------------------------- mes recettes */
+
+const formatFCFA = (value) =>
+  `${new Intl.NumberFormat('fr-FR').format(Math.max(0, Math.round(Number(value) || 0)))} F CFA`
+
+const REVENUE_PERIODS = [
+  { value: 'day', label: 'Aujourd’hui', series: 'Jour par jour (14 derniers)' },
+  { value: 'week', label: 'Cette semaine', series: 'Semaine par semaine (12 dernières)' },
+  { value: 'month', label: 'Ce mois', series: 'Mois par mois (12 derniers)' },
+]
+
+// Les clés de série sont des dates ISO : AAAA-MM-JJ pour le jour et la semaine,
+// AAAA-MM pour le mois.
+const bucketLabel = (key, period) => {
+  if (period === 'month') {
+    const [year, month] = key.split('-')
+    return new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(new Date(Number(year), Number(month) - 1, 1))
+  }
+  const formatted = new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short' }).format(new Date(`${key}T00:00:00Z`))
+  return period === 'week' ? `Semaine du ${formatted}` : formatted
+}
+
+function Recettes() {
+  const [data, setData] = useState(null)
+  const [period, setPeriod] = useState('day')
+  const [error, setError] = useState('')
+  useEffect(() => { api('/delegate/revenue').then(setData).catch((e) => setError(e.message)) }, [])
+
+  const current = REVENUE_PERIODS.find((p) => p.value === period)
+  const buckets = data?.series[period] || []
+  const max = Math.max(...buckets.map((b) => b.amount), 1)
+
+  return (
+    <Shell>
+      <Header
+        eyebrow="Finances"
+        title="Mes recettes"
+        description={`Part qui vous revient sur les certificats payés par les citoyens de votre quartier : ${data?.sharePercent ?? 90} % du montant encaissé.`}
+      />
+
+      {error && <article className="panel"><p className="list-state">Impossible de charger vos recettes : {error}</p></article>}
+      {!data && !error && <article className="panel"><p className="list-state">Chargement de vos recettes…</p></article>}
+
+      {data && (
+        <>
+          <div className="period-tabs">
+            {REVENUE_PERIODS.map((p) => (
+              <button type="button" key={p.value} className={period === p.value ? 'on' : ''} onClick={() => setPeriod(p.value)}>{p.label}</button>
+            ))}
+          </div>
+
+          <section className="stats revenue-stats">
+            <article><div><Wallet size={21} /></div><span>{current.label}</span><strong>{formatFCFA(data[period].amount)}</strong></article>
+            <article><div><Receipt size={21} /></div><span>Documents payés — {current.label.toLowerCase()}</span><strong>{data[period].count}</strong></article>
+            <article><div><PiggyBank size={21} /></div><span>Total depuis le début</span><strong>{formatFCFA(data.total)}</strong></article>
+          </section>
+
+          <article className="panel">
+            <div className="panel-head"><div><span>Évolution</span><h3>{current.series}</h3></div></div>
+            {buckets.length === 0
+              ? <p className="list-state">Aucun encaissement sur cette période.</p>
+              : <div className="revenue-bars">{buckets.map((bucket) => (
+                  <div className="revenue-bar" key={bucket.key}>
+                    <span className="revenue-bar-label">{bucketLabel(bucket.key, period)}</span>
+                    <div className="revenue-bar-track"><i style={{ width: `${Math.max(2, (bucket.amount / max) * 100)}%` }} /></div>
+                    <strong>{formatFCFA(bucket.amount)}</strong>
+                  </div>
+                ))}</div>}
+          </article>
+
+          <article className="panel revenue-recent">
+            <div className="panel-head"><div><span>Journal</span><h3>Derniers paiements reçus</h3></div><span className="soft-badge">{data.count} au total</span></div>
+            {data.recent.length === 0
+              ? <p className="list-state">Aucun citoyen n’a encore payé de certificat.</p>
+              : <div className="revenue-table-wrap"><table className="revenue-table">
+                  <thead><tr><th>Date</th><th>Dossier</th><th>Citoyen</th><th>Opérateur</th><th>Montant payé</th><th>Ma part</th></tr></thead>
+                  <tbody>{data.recent.map((row, index) => (
+                    <tr key={`${row.reference}-${index}`}>
+                      <td>{dateTimeFR(row.paidAt)}</td>
+                      <td><strong>{row.reference}</strong></td>
+                      <td>{row.citizen || '—'}</td>
+                      <td><span className={`provider-chip ${row.provider}`}>{row.providerLabel}</span></td>
+                      <td>{formatFCFA(row.amount)}</td>
+                      <td className="revenue-total">{formatFCFA(row.share)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table></div>}
+          </article>
+        </>
+      )}
+    </Shell>
+  )
+}
+
 function Profil() {
   const [me, setMe] = useState(null)
   useEffect(() => { api('/me').then(setMe).catch(() => {}) }, [])
@@ -654,6 +749,7 @@ export default function App() {
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/demandes" element={<Protected><Demandes /></Protected>} />
       <Route path="/demandes/:id" element={<Protected><CertificateWorkspace /></Protected>} />
+      <Route path="/recettes" element={<Protected><Recettes /></Protected>} />
       <Route path="/profil" element={<Protected><Profil /></Protected>} />
       <Route path="*" element={<Navigate to={isLoggedIn() ? '/dashboard' : '/connexion'} replace />} />
     </Routes>

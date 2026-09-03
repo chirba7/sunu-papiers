@@ -3,10 +3,13 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-r
 import {
   AlertCircle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, ChevronRight, Clock,
   Download, Eye, EyeOff, FileCheck2, FileText, Home, Hourglass, IdCard, Lock, LockKeyhole,
-  LogOut, MapPin, Phone, RotateCw, ShieldCheck, Sparkles, UserRound, X, XCircle
+  LogOut, MapPin, Phone, RotateCw, ShieldCheck, Sparkles, UserRound, Wallet, X, XCircle
 } from 'lucide-react'
 import { api, isLoggedIn, login, logout as apiLogout, register, uploadUrl } from './api.js'
-import { DOCUMENT_TYPES, paperStatus, refreshPapers, resetPapers, usePapers } from './papers-store.js'
+import {
+  DOCUMENT_TYPES, PAYMENT_PROVIDERS, formatFCFA, paperStatus, payPaper,
+  refreshPapers, resetPapers, usePapers,
+} from './papers-store.js'
 
 const pause = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -447,9 +450,83 @@ function HomePage({ profile }) {
 const dateFR = (value) =>
   value ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(value)) : ''
 
-function PaperCard({ paper, onRedo }) {
+function PaymentModal({ paper, onClose, onDone }) {
+  const [provider, setProvider] = useState(PAYMENT_PROVIDERS[0].value)
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setPaying(true)
+    setError('')
+    try {
+      const result = await payPaper(paper.id, provider)
+      onDone(result.message || 'Paiement confirmé.')
+      onClose()
+    } catch (paymentError) {
+      setError(paymentError.message)
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="modal payment-modal" onSubmit={submit}>
+        <button type="button" className="modal-x" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
+        <div className="payment-head">
+          <span className="payment-icon"><Wallet size={22} /></span>
+          <div>
+            <h3>Payer pour consulter</h3>
+            <p>{paper.type} · {paper.reference}</p>
+          </div>
+        </div>
+
+        <div className="payment-amount">
+          <span>Montant à régler</span>
+          <strong>{formatFCFA(paper.price)}</strong>
+        </div>
+
+        <div className="payment-providers">
+          <span className="payment-label">Moyen de paiement</span>
+          {PAYMENT_PROVIDERS.map((option) => (
+            <label key={option.value} className={`payment-provider ${provider === option.value ? 'on' : ''}`} style={{ '--accent': option.accent }}>
+              <input
+                type="radio"
+                name="provider"
+                value={option.value}
+                checked={provider === option.value}
+                onChange={() => setProvider(option.value)}
+              />
+              <img src={option.logo} alt="" aria-hidden="true" />
+              <span>{option.label}</span>
+              <Check size={18} className="payment-check" />
+            </label>
+          ))}
+        </div>
+
+        {error && <p className="payment-error"><AlertCircle size={16} /> {error}</p>}
+
+        <p className="payment-note">
+          <ShieldCheck size={15} /> Paiement simulé : aucun montant n’est réellement débité.
+          Une fois réglé, le certificat reste accessible sans repayer.
+        </p>
+
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>Annuler</button>
+          <button className="save-button" disabled={paying}>
+            {paying ? 'Paiement en cours…' : `Payer ${formatFCFA(paper.price)}`}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function PaperCard({ paper, onRedo, onPay }) {
   const meta = paperStatus(paper.status)
   const Icon = meta.tone === 'ok' ? CheckCircle2 : meta.tone === 'bad' ? XCircle : Hourglass
+  const ready = paper.status === 'approved' && paper.certificatePath
   return (
     <article className={`paper-card tone-${meta.tone}`}>
       <div className="paper-card-head">
@@ -461,7 +538,11 @@ function PaperCard({ paper, onRedo }) {
         <span className={`paper-badge tone-${meta.tone}`}><Icon size={14} />{meta.label}</span>
       </div>
 
-      <p className="paper-help">{meta.help}</p>
+      <p className="paper-help">
+        {ready && !paper.paid
+          ? `Votre certificat est prêt. Réglez ${formatFCFA(paper.price)} pour le consulter et le télécharger.`
+          : meta.help}
+      </p>
 
       {paper.status === 'rejected' && paper.rejectionReason && (
         <div className="paper-reason">
@@ -470,12 +551,24 @@ function PaperCard({ paper, onRedo }) {
         </div>
       )}
 
+      {ready && paper.paid && paper.payment && (
+        <div className="paper-paid">
+          <CheckCircle2 size={16} />
+          <span>Payé {formatFCFA(paper.payment.amount)} via {paper.payment.providerLabel} le {dateFR(paper.payment.paidAt)}</span>
+        </div>
+      )}
+
       <div className="paper-card-foot">
         <span className="paper-address"><MapPin size={15} />{paper.address}</span>
-        {paper.status === 'approved' && paper.certificatePath && (
+        {ready && paper.paid && (
           <a className="save-button" href={uploadUrl(paper.certificatePath)} target="_blank" rel="noreferrer">
-            <Download size={17} /> Télécharger le certificat
+            <Download size={17} /> Voir et télécharger
           </a>
+        )}
+        {ready && !paper.paid && (
+          <button type="button" className="save-button pay-button" onClick={() => onPay(paper)}>
+            <Wallet size={17} /> Voir le document — {formatFCFA(paper.price)}
+          </button>
         )}
         {paper.status === 'rejected' && (
           <button type="button" className="secondary-button" onClick={onRedo}>Refaire une demande</button>
@@ -485,11 +578,13 @@ function PaperCard({ paper, onRedo }) {
   )
 }
 
-function PapersPage() {
+function PapersPage({ setToast }) {
   const navigate = useNavigate()
   const { papers, loading, refreshing, error } = usePapers()
   const [status, setStatus] = useState('all')
   const [type, setType] = useState('domicile')
+  // Document dont le paiement est en cours : null tant que la modale est fermee.
+  const [paying, setPaying] = useState(null)
 
   const typeFilter = DOCUMENT_TYPES.find((t) => t.value === type)
 
@@ -570,9 +665,18 @@ function PapersPage() {
       ) : (
         <section className="paper-list">
           {filtered.map((paper) => (
-            <PaperCard key={paper.id} paper={paper} onRedo={() => navigate('/app/nouvelle-demande')} />
+            <PaperCard
+              key={paper.id}
+              paper={paper}
+              onRedo={() => navigate('/app/nouvelle-demande')}
+              onPay={setPaying}
+            />
           ))}
         </section>
+      )}
+
+      {paying && (
+        <PaymentModal paper={paying} onClose={() => setPaying(null)} onDone={setToast} />
       )}
     </div>
   )
@@ -687,7 +791,7 @@ function RequestPage({ setToast }) {
   const navigate=useNavigate(); const [houses,setHouses]=useState([]); const [houseId,setHouseId]=useState(''); const [loading,setLoading]=useState(false); const [loadingHouses,setLoadingHouses]=useState(true); const [housesError,setHousesError]=useState('')
   useEffect(()=>{api('/houses').then(setHouses).catch(e=>{setHousesError(e.message);setToast(e.message)}).finally(()=>setLoadingHouses(false))},[setToast])
   const submit=async(e)=>{e.preventDefault();if(!houseId){setToast('Choisissez une administration.');return}setLoading(true);try{const result=await api('/requests',{method:'POST',body:JSON.stringify({houseId:Number(houseId)})});setToast(`Demande ${result.reference} envoyée.`);refreshPapers();navigate('/app/mes-papiers')}catch(error){setToast(error.message)}finally{setLoading(false)}}
-  return <div className="page-content account-page"><section className="page-title-row"><div><p className="page-eyebrow">Nouvelle démarche</p><h1>Certificat de domicile</h1><p>La demande sera transmise à l’administration de quartier sélectionnée.</p></div><div className="page-icon-box"><FileText size={26}/></div></section><form className="profile-form" onSubmit={submit}><section className="profile-section"><div className="profile-section-title"><span>01</span><div><h2>Administration</h2><p>Sélectionnez la maison du délégué correspondant à votre quartier.</p></div></div><div className="profile-grid"><label className="full"><span>Administration de quartier</span><select value={houseId} onChange={e=>setHouseId(e.target.value)} disabled={loadingHouses||Boolean(housesError)}><option value="">{loadingHouses?'Chargement des administrations…':'Choisir une administration'}</option>{houses.map(h=><option key={h.id} value={h.id}>Maison de quartier de {h.quartier} — {h.commune}, {h.departement}</option>)}</select></label>{!loadingHouses&&!housesError&&houses.length===0&&<p className="full">Aucune administration de quartier n’est disponible pour le moment.</p>}{housesError&&<p className="full">Impossible de charger les administrations : {housesError}</p>}</div></section><div className="profile-save-bar"><div><ShieldCheck size={18}/><span>Votre dossier sera accessible uniquement au délégué affecté à cette administration.</span></div><button className="save-button" disabled={loading||loadingHouses||houses.length===0}>{loading?'Envoi…':'Envoyer la demande'}</button></div></form></div>
+  return <div className="page-content account-page"><section className="page-title-row"><div><p className="page-eyebrow">Nouvelle démarche</p><h1>Certificat de domicile</h1><p>La demande sera transmise à l’administration de quartier sélectionnée.</p></div><div className="page-icon-box"><FileText size={26}/></div></section><form className="profile-form" onSubmit={submit}><section className="profile-section"><div className="profile-section-title"><span>01</span><div><h2>Administration</h2><p>Sélectionnez la maison du délégué correspondant à votre quartier.</p></div></div><div className="profile-grid"><label className="full"><span>Administration de quartier</span><select value={houseId} onChange={e=>setHouseId(e.target.value)} disabled={loadingHouses||Boolean(housesError)}><option value="">{loadingHouses?'Chargement des administrations…':'Choisir une administration'}</option>{houses.map(h=><option key={h.id} value={h.id}>Maison de quartier de {h.quartier} — {h.commune}, {h.departement}{h.document_price?` · ${formatFCFA(h.document_price)}`:''}</option>)}</select></label>{!loadingHouses&&!housesError&&houses.length===0&&<p className="full">Aucune administration de quartier n’est disponible pour le moment.</p>}{housesError&&<p className="full">Impossible de charger les administrations : {housesError}</p>}</div></section><div className="profile-save-bar"><div><ShieldCheck size={18}/><span>La demande est gratuite. Le certificat se règle au moment de le consulter dans « Mes papiers ».</span></div><button className="save-button" disabled={loading||loadingHouses||houses.length===0}>{loading?'Envoi…':'Envoyer la demande'}</button></div></form></div>
 }
 
 function ProtectedApp() {
@@ -736,7 +840,7 @@ function ProtectedApp() {
         <Routes>
           <Route path="home" element={<HomePage profile={profile} />} />
           <Route path="nouvelle-demande" element={<RequestPage setToast={setToast} />} />
-          <Route path="mes-papiers" element={<PapersPage />} />
+          <Route path="mes-papiers" element={<PapersPage setToast={setToast} />} />
           <Route path="mon-compte" element={<AccountPage profile={profile} setProfile={setProfile} setToast={setToast} />} />
           <Route path="*" element={<Navigate to="home" replace />} />
         </Routes>

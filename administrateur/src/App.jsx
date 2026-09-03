@@ -3,7 +3,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import {
   ArrowRight, BarChart3, Building2, CheckCircle2, ChevronRight, ClipboardList, Copy,
   Eye, EyeOff, FileCheck2, FileText, Home, Image as ImageIcon, KeyRound, LockKeyhole,
-  LogOut, Mail, MapPin, Menu, Pencil, Plus, ShieldCheck, Sparkles, Trash2, Upload, UserPlus, Users, X
+  Coins, Landmark, LogOut, Mail, MapPin, Menu, Pencil, Plus, Receipt, ShieldCheck, Sparkles,
+  Trash2, Upload, UserPlus, Users, Wallet, X
 } from 'lucide-react'
 import { api, isLoggedIn, login, logout as apiLogout } from './api.js'
 
@@ -109,6 +110,7 @@ const navItems = [
   { path: '/maisons', label: 'Maison chef du quartier', icon: Home },
   { path: '/delegues', label: 'Délégué du quartier', icon: Users },
   { path: '/documents', label: 'Document administratif', icon: FileText },
+  { path: '/recettes', label: 'Recettes', icon: Wallet },
 ]
 
 function AppShell({ children }) {
@@ -128,9 +130,11 @@ function StatCard({ icon: Icon, label, value, note }) {
 }
 
 function DashboardPage() {
+  const navigate=useNavigate()
   const [stats,setStats]=useState({houses:0,citizens:0,requests:0,pending:0,delegates:0})
-  useEffect(()=>{api('/admin/dashboard').then(setStats).catch(()=>{})},[])
-  return <AppShell><PageHeader eyebrow="Vue d’ensemble" title="Dashboard" description="Suivez les principaux indicateurs de la plateforme Sunu Papier."/><section className="stats-grid"><StatCard icon={Home} label="Maisons de chef de quartier" value={stats.houses} note="Maisons configurées"/><StatCard icon={Users} label="Citoyens inscrits" value={stats.citizens} note="Comptes réels"/><StatCard icon={ClipboardList} label="Demandes faites" value={stats.requests} note={`${stats.pending} en attente`}/><StatCard icon={UserPlus} label="Délégués actifs" value={stats.delegates} note="Comptes créés"/></section><section className="dashboard-grid"><article className="panel"><div className="panel-head"><div><span>Activité</span><h3>Demandes administratives</h3></div><span className="soft-badge">Temps réel</span></div><div className="progress-list"><div><span><i/>En attente</span><strong>{stats.pending}</strong><b style={{width:`${stats.requests?stats.pending/stats.requests*100:0}%`}}/></div></div></article><article className="panel"><div className="panel-head"><div><span>Document actif</span><h3>Certificat de domicile</h3></div><FileCheck2 size={24}/></div><p className="panel-copy">Les demandes sont acheminées vers le délégué correspondant au quartier sélectionné.</p><div className="rule-card"><ShieldCheck size={19}/><div><strong>Affectation par quartier</strong><span>Maison ↔ délégué</span></div></div></article></section></AppShell>
+  const [revenue,setRevenue]=useState(null)
+  useEffect(()=>{api('/admin/dashboard').then(setStats).catch(()=>{});api('/admin/revenue').then(setRevenue).catch(()=>{})},[])
+  return <AppShell><PageHeader eyebrow="Vue d’ensemble" title="Dashboard" description="Suivez les principaux indicateurs de la plateforme Sunu Papier."/><section className="stats-grid"><StatCard icon={Home} label="Maisons de chef de quartier" value={stats.houses} note="Maisons configurées"/><StatCard icon={Users} label="Citoyens inscrits" value={stats.citizens} note="Comptes réels"/><StatCard icon={ClipboardList} label="Demandes faites" value={stats.requests} note={`${stats.pending} en attente`}/><StatCard icon={UserPlus} label="Délégués actifs" value={stats.delegates} note="Comptes créés"/></section><section className="dashboard-grid"><article className="panel"><div className="panel-head"><div><span>Activité</span><h3>Demandes administratives</h3></div><span className="soft-badge">Temps réel</span></div><div className="progress-list"><div><span><i/>En attente</span><strong>{stats.pending}</strong><b style={{width:`${stats.requests?stats.pending/stats.requests*100:0}%`}}/></div></div></article><article className="panel"><div className="panel-head"><div><span>Recettes</span><h3>Ce mois</h3></div><Wallet size={24}/></div><div className="split-row"><span>Encaissé</span><strong>{formatFCFA(revenue?.collected.month.amount||0)}</strong></div><div className="split-row"><span>Part administration</span><strong>{formatFCFA(revenue?.platform.month.amount||0)}</strong></div><div className="split-row"><span>À reverser aux délégués</span><strong>{formatFCFA(revenue?.delegates.month.amount||0)}</strong></div><button type="button" className="secondary-button revenue-link" onClick={()=>navigate('/recettes')}>Voir le détail <ChevronRight size={17}/></button></article><article className="panel"><div className="panel-head"><div><span>Document actif</span><h3>Certificat de domicile</h3></div><FileCheck2 size={24}/></div><p className="panel-copy">Les demandes sont acheminées vers le délégué correspondant au quartier sélectionné.</p><div className="rule-card"><ShieldCheck size={19}/><div><strong>Affectation par quartier</strong><span>Maison ↔ délégué</span></div></div></article></section></AppShell>
 }
 
 function DelegateEditModal({ delegate, onClose, onSaved, onError }) {
@@ -141,10 +145,10 @@ function DelegateEditModal({ delegate, onClose, onSaved, onError }) {
 }
 
 function HouseEditModal({ house, delegates, onClose, onSaved, onError }) {
-  const [form,setForm]=useState({region:house.region,departement:house.departement,commune:house.commune,quartier:house.quartier,delegateId:String(house.delegate_id||''),fields:houseFields(house),seal:null})
+  const [form,setForm]=useState({region:house.region,departement:house.departement,commune:house.commune,quartier:house.quartier,delegateId:String(house.delegate_id||''),price:String(house.document_price??0),fields:houseFields(house),seal:null})
   const [saving,setSaving]=useState(false)
-  const submit=async(e)=>{e.preventDefault();if(!form.fields.length){onError({tone:'bad',message:'Sélectionnez au moins un champ du certificat.'});return}setSaving(true);const body=new FormData();['region','departement','commune','quartier','delegateId'].forEach(k=>body.append(k,form[k]));body.append('fields',JSON.stringify(form.fields));if(form.seal)body.append('seal',form.seal);try{await api(`/admin/houses/${house.id}`,{method:'PUT',body});onSaved()}catch(error){onError({tone:'bad',message:error.message})}finally{setSaving(false)}}
-  return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><form className="modal edit-modal house-edit-modal" onSubmit={submit}><button type="button" className="modal-x" onClick={onClose}><X size={18}/></button><h3>Modifier la maison</h3><p>Modifiez la localisation, l’affectation et, si nécessaire, les fichiers.</p><Field label="Délégué associé" icon={Users}><select value={form.delegateId} onChange={e=>setForm({...form,delegateId:e.target.value})}><option value="">Sélectionner</option>{delegates.map(d=><option key={d.id} value={d.id}>{d.firstName} {d.lastName}</option>)}</select></Field><div className="form-grid"><Field label="Région" icon={MapPin}><input value={form.region} onChange={e=>setForm({...form,region:e.target.value})}/></Field><Field label="Département" icon={MapPin}><input value={form.departement} onChange={e=>setForm({...form,departement:e.target.value})}/></Field><Field label="Commune" icon={MapPin}><input value={form.commune} onChange={e=>setForm({...form,commune:e.target.value})}/></Field><Field label="Quartier" icon={MapPin}><input value={form.quartier} onChange={e=>setForm({...form,quartier:e.target.value})}/></Field></div><FieldPicker value={form.fields} onChange={fields=>setForm({...form,fields})}/><div className="uploads"><UploadField label={house.seal_path?'Remplacer la signature et le cachet':'Importer la signature et le cachet'} accept="image/png,image/jpeg" file={form.seal} onChange={v=>setForm({...form,seal:v})} icon={ImageIcon}/></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Annuler</button><button className="primary-button" disabled={saving}>{saving?'Enregistrement…':'Enregistrer'}</button></div></form></div>
+  const submit=async(e)=>{e.preventDefault();if(!form.fields.length){onError({tone:'bad',message:'Sélectionnez au moins un champ du certificat.'});return}setSaving(true);const body=new FormData();['region','departement','commune','quartier','delegateId','price'].forEach(k=>body.append(k,form[k]));body.append('fields',JSON.stringify(form.fields));if(form.seal)body.append('seal',form.seal);try{await api(`/admin/houses/${house.id}`,{method:'PUT',body});onSaved()}catch(error){onError({tone:'bad',message:error.message})}finally{setSaving(false)}}
+  return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><form className="modal edit-modal house-edit-modal" onSubmit={submit}><button type="button" className="modal-x" onClick={onClose}><X size={18}/></button><h3>Modifier la maison</h3><p>Modifiez la localisation, l’affectation et, si nécessaire, les fichiers.</p><Field label="Délégué associé" icon={Users}><select value={form.delegateId} onChange={e=>setForm({...form,delegateId:e.target.value})}><option value="">Sélectionner</option>{delegates.map(d=><option key={d.id} value={d.id}>{d.firstName} {d.lastName}</option>)}</select></Field><div className="form-grid"><Field label="Région" icon={MapPin}><input value={form.region} onChange={e=>setForm({...form,region:e.target.value})}/></Field><Field label="Département" icon={MapPin}><input value={form.departement} onChange={e=>setForm({...form,departement:e.target.value})}/></Field><Field label="Commune" icon={MapPin}><input value={form.commune} onChange={e=>setForm({...form,commune:e.target.value})}/></Field><Field label="Quartier" icon={MapPin}><input value={form.quartier} onChange={e=>setForm({...form,quartier:e.target.value})}/></Field></div><Field label="Prix du certificat (F CFA)" icon={Wallet} hint="0 = gratuit"><input type="number" min="0" step="50" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/></Field><FieldPicker value={form.fields} onChange={fields=>setForm({...form,fields})}/><div className="uploads"><UploadField label={house.seal_path?'Remplacer la signature et le cachet':'Importer la signature et le cachet'} accept="image/png,image/jpeg" file={form.seal} onChange={v=>setForm({...form,seal:v})} icon={ImageIcon}/></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Annuler</button><button className="primary-button" disabled={saving}>{saving?'Enregistrement…':'Enregistrer'}</button></div></form></div>
 }
 
 function DelegatesPage() {
@@ -197,19 +201,131 @@ function UploadField({ label, accept, file, onChange, icon:Icon=Upload }) {
 function HousesPage() {
   const [delegates, setDelegates] = useState([])
   const [houses,setHouses]=useState([])
-  const [form,setForm]=useState({region:'Dakar',departement:'Dakar',commune:'',quartier:'',delegateId:'',fields:DEFAULT_FIELDS,seal:null})
+  const [form,setForm]=useState({region:'Dakar',departement:'Dakar',commune:'',quartier:'',delegateId:'',price:'2000',fields:DEFAULT_FIELDS,seal:null})
   const [toast,setToast]=useState('')
   const [editing,setEditing]=useState(null)
   useEffect(()=>{Promise.all([api('/admin/delegates'),api('/admin/houses')]).then(([d,h])=>{setDelegates(d);setHouses(h)}).catch(e=>setToast({tone:'bad',message:e.message}))},[])
   const editHouse=(h)=>setEditing(h)
   const deleteHouse=async(h)=>{if(!window.confirm(`Supprimer la maison de ${h.quartier} ?`))return;try{await api(`/admin/houses/${h.id}`,{method:'DELETE'});setHouses(list=>list.filter(item=>item.id!==h.id));setToast('La maison a été supprimée.')}catch(error){setToast({tone:'bad',message:error.message})}}
-  const submit=async(e)=>{e.preventDefault();if(!form.commune||!form.quartier||!form.delegateId){setToast({tone:'bad',message:'Complétez la localisation et choisissez un délégué.'});return}if(!form.seal){setToast({tone:'bad',message:'Importez l’image de la signature et du cachet du délégué.'});return}if(!form.fields.length){setToast({tone:'bad',message:'Sélectionnez au moins un champ du certificat.'});return}const body=new FormData();['region','departement','commune','quartier','delegateId'].forEach(k=>body.append(k,form[k]));body.append('fields',JSON.stringify(form.fields));body.append('seal',form.seal);try{await api('/admin/houses',{method:'POST',body});const updated=await api('/admin/houses');setHouses(updated);setForm({region:'Dakar',departement:'Dakar',commune:'',quartier:'',delegateId:'',fields:DEFAULT_FIELDS,seal:null});setToast('Maison de chef de quartier créée et délégué affecté.')}catch(error){setToast({tone:'bad',message:error.message})}}
+  const submit=async(e)=>{e.preventDefault();if(!form.commune||!form.quartier||!form.delegateId){setToast({tone:'bad',message:'Complétez la localisation et choisissez un délégué.'});return}if(!form.seal){setToast({tone:'bad',message:'Importez l’image de la signature et du cachet du délégué.'});return}if(!form.fields.length){setToast({tone:'bad',message:'Sélectionnez au moins un champ du certificat.'});return}if(Number(form.price)<0||form.price===''){setToast({tone:'bad',message:'Indiquez le prix du certificat (0 pour un document gratuit).'});return}const body=new FormData();['region','departement','commune','quartier','delegateId','price'].forEach(k=>body.append(k,form[k]));body.append('fields',JSON.stringify(form.fields));body.append('seal',form.seal);try{await api('/admin/houses',{method:'POST',body});const updated=await api('/admin/houses');setHouses(updated);setForm({region:'Dakar',departement:'Dakar',commune:'',quartier:'',delegateId:'',price:'2000',fields:DEFAULT_FIELDS,seal:null});setToast('Maison de chef de quartier créée et délégué affecté.')}catch(error){setToast({tone:'bad',message:error.message})}}
   const delegateName=(id)=>houses.find(h=>h.delegate_id===Number(id))?.delegateName||(()=>{const d=delegates.find(x=>x.id===Number(id));return d?`${d.firstName} ${d.lastName}`:'—'})()
-  return <AppShell><PageHeader eyebrow="Organisation territoriale" title="Maisons de chef de quartier" description="Associez une maison à un délégué puis gérez ses informations et éléments de signature."/><section className="two-panel house-layout"><form className="panel form-panel" onSubmit={submit}><div className="panel-head"><div><span>Nouvelle maison</span><h3>Créer une maison de chef de quartier</h3></div><Building2 size={23}/></div><Field label="Délégué associé" icon={Users}><select value={form.delegateId} onChange={(e)=>setForm({...form,delegateId:e.target.value})}><option value="">Sélectionner un délégué</option>{delegates.map(d=><option value={d.id} key={d.id}>{d.firstName} {d.lastName}</option>)}</select></Field><div className="form-grid"><Field label="Région" icon={MapPin}><input value={form.region} onChange={(e)=>setForm({...form,region:e.target.value})}/></Field><Field label="Département" icon={MapPin}><input value={form.departement} onChange={(e)=>setForm({...form,departement:e.target.value})}/></Field><Field label="Commune" icon={MapPin}><input value={form.commune} onChange={(e)=>setForm({...form,commune:e.target.value})} placeholder="Ex. Grand Yoff"/></Field><Field label="Quartier" icon={MapPin}><input value={form.quartier} onChange={(e)=>setForm({...form,quartier:e.target.value})} placeholder="Ex. Grand-Yoff"/></Field></div><FieldPicker value={form.fields} onChange={(fields)=>setForm({...form,fields})}/><div className="uploads"><UploadField label="Signature et cachet du délégué" accept="image/png,image/jpeg" file={form.seal} onChange={(v)=>setForm({...form,seal:v})} icon={ImageIcon}/></div><button className="primary-button"><Plus size={18}/> Créer la maison</button></form><article className="panel list-panel"><div className="panel-head"><div><span>Maisons configurées</span><h3>{houses.length} maison(s)</h3></div></div><div className="record-list">{houses.map(h=><div className="house-record" key={h.id}><div className="house-title"><span className="record-avatar"><Home size={18}/></span><div><strong>{h.quartier}</strong><span>{h.commune} · {h.departement}</span></div><div className="record-actions house-actions"><button type="button" onClick={()=>editHouse(h)} title="Modifier"><Pencil size={16}/></button><button type="button" className="danger" onClick={()=>deleteHouse(h)} title="Supprimer"><Trash2 size={16}/></button></div></div><div className="house-meta"><span><Users size={14}/>{h.delegateName||'Aucun délégué'}</span><span><FileText size={14}/>{houseFields(h).length} champ(s)</span><span><ImageIcon size={14}/>{h.seal_path?'Signature et cachet importés':'Signature manquante'}</span></div></div>)}</div></article></section>{editing&&<HouseEditModal house={editing} delegates={delegates} onClose={()=>setEditing(null)} onError={setToast} onSaved={async()=>{setHouses(await api('/admin/houses'));setEditing(null);setToast('La maison a été modifiée.')}}/>}{toast&&<Toast message={toast} onClose={()=>setToast('')}/>}</AppShell>
+  return <AppShell><PageHeader eyebrow="Organisation territoriale" title="Maisons de chef de quartier" description="Associez une maison à un délégué puis gérez ses informations et éléments de signature."/><section className="two-panel house-layout"><form className="panel form-panel" onSubmit={submit}><div className="panel-head"><div><span>Nouvelle maison</span><h3>Créer une maison de chef de quartier</h3></div><Building2 size={23}/></div><Field label="Délégué associé" icon={Users}><select value={form.delegateId} onChange={(e)=>setForm({...form,delegateId:e.target.value})}><option value="">Sélectionner un délégué</option>{delegates.map(d=><option value={d.id} key={d.id}>{d.firstName} {d.lastName}</option>)}</select></Field><div className="form-grid"><Field label="Région" icon={MapPin}><input value={form.region} onChange={(e)=>setForm({...form,region:e.target.value})}/></Field><Field label="Département" icon={MapPin}><input value={form.departement} onChange={(e)=>setForm({...form,departement:e.target.value})}/></Field><Field label="Commune" icon={MapPin}><input value={form.commune} onChange={(e)=>setForm({...form,commune:e.target.value})} placeholder="Ex. Grand Yoff"/></Field><Field label="Quartier" icon={MapPin}><input value={form.quartier} onChange={(e)=>setForm({...form,quartier:e.target.value})} placeholder="Ex. Grand-Yoff"/></Field></div><Field label="Prix du certificat (F CFA)" icon={Wallet} hint="0 = gratuit"><input type="number" min="0" step="50" value={form.price} onChange={(e)=>setForm({...form,price:e.target.value})} placeholder="Ex. 2000"/></Field><FieldPicker value={form.fields} onChange={(fields)=>setForm({...form,fields})}/><div className="uploads"><UploadField label="Signature et cachet du délégué" accept="image/png,image/jpeg" file={form.seal} onChange={(v)=>setForm({...form,seal:v})} icon={ImageIcon}/></div><button className="primary-button"><Plus size={18}/> Créer la maison</button></form><article className="panel list-panel"><div className="panel-head"><div><span>Maisons configurées</span><h3>{houses.length} maison(s)</h3></div></div><div className="record-list">{houses.map(h=><div className="house-record" key={h.id}><div className="house-title"><span className="record-avatar"><Home size={18}/></span><div><strong>{h.quartier}</strong><span>{h.commune} · {h.departement}</span></div><div className="record-actions house-actions"><button type="button" onClick={()=>editHouse(h)} title="Modifier"><Pencil size={16}/></button><button type="button" className="danger" onClick={()=>deleteHouse(h)} title="Supprimer"><Trash2 size={16}/></button></div></div><div className="house-meta"><span><Users size={14}/>{h.delegateName||'Aucun délégué'}</span><span><FileText size={14}/>{houseFields(h).length} champ(s)</span><span><Wallet size={14}/>{Number(h.document_price)>0?formatFCFA(h.document_price):'Gratuit'}</span><span><ImageIcon size={14}/>{h.seal_path?'Signature et cachet importés':'Signature manquante'}</span></div></div>)}</div></article></section>{editing&&<HouseEditModal house={editing} delegates={delegates} onClose={()=>setEditing(null)} onError={setToast} onSaved={async()=>{setHouses(await api('/admin/houses'));setEditing(null);setToast('La maison a été modifiée.')}}/>}{toast&&<Toast message={toast} onClose={()=>setToast('')}/>}</AppShell>
 }
 
 function DocumentsPage(){return <AppShell><PageHeader eyebrow="Catalogue" title="Documents administratifs" description="Gérez les types de documents proposés aux citoyens."/><article className="document-card"><div className="document-icon"><FileCheck2 size={28}/></div><div className="document-info"><span className="status active">Actif</span><h3>Certificat de domicile</h3><p>Document disponible pour les citoyens. Le modèle, la signature et le cachet sont configurés au niveau de chaque maison de chef de quartier.</p><div className="document-stats"><span><ClipboardList size={16}/>37 demandes</span><span><Home size={16}/>2 quartiers configurés</span></div></div><button className="secondary-button">Configurer <ChevronRight size={17}/></button></article></AppShell>}
 
+// Formatage unique des montants pour tout l'espace administrateur.
+const formatFCFA=(value)=>`${new Intl.NumberFormat('fr-FR').format(Math.max(0,Math.round(Number(value)||0)))} F CFA`
+
+const PERIODS=[
+  {value:'day',label:'Aujourd’hui',series:'Jour par jour (14 derniers)'},
+  {value:'week',label:'Cette semaine',series:'Semaine par semaine (12 dernières)'},
+  {value:'month',label:'Ce mois',series:'Mois par mois (12 derniers)'},
+]
+// Les clés des séries sont des dates ISO : jour et semaine en AAAA-MM-JJ, mois en AAAA-MM.
+const bucketLabel=(key,period)=>{
+  if(period==='month'){const [y,m]=key.split('-');return new Intl.DateTimeFormat('fr-FR',{month:'long',year:'numeric'}).format(new Date(Number(y),Number(m)-1,1))}
+  const date=new Date(`${key}T00:00:00Z`)
+  const formatted=new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'short'}).format(date)
+  return period==='week'?`Semaine du ${formatted}`:formatted
+}
+const dateTimeFR=(value)=>value?new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value)):''
+
+function RevenueBars({ buckets, period }) {
+  if(!buckets.length) return <p className="panel-copy">Aucun encaissement sur cette période.</p>
+  const max=Math.max(...buckets.map(b=>b.amount),1)
+  return <div className="revenue-bars">{buckets.map(bucket=>
+    <div className="revenue-bar" key={bucket.key}>
+      <span className="revenue-bar-label">{bucketLabel(bucket.key,period)}</span>
+      <div className="revenue-bar-track"><i style={{width:`${Math.max(2,bucket.amount/max*100)}%`}}/></div>
+      <strong>{formatFCFA(bucket.amount)}</strong>
+    </div>)}</div>
+}
+
+function RevenuePage() {
+  const [data,setData]=useState(null)
+  const [period,setPeriod]=useState('day')
+  const [error,setError]=useState('')
+  useEffect(()=>{api('/admin/revenue').then(setData).catch(e=>setError(e.message))},[])
+
+  const current=PERIODS.find(p=>p.value===period)
+  // Le total de la période sort du même objet que les séries : jamais recalculé
+  // côté client, pour éviter deux vérités sur le même chiffre.
+  const slice=(summary)=>summary?summary[period]:{amount:0,count:0}
+
+  return <AppShell>
+    <PageHeader eyebrow="Finances" title="Recettes" description={`Les citoyens paient leurs certificats à l’administration, qui reverse ${data?.sharePercent??90} % au délégué du quartier.`}/>
+    {error&&<article className="panel"><p className="panel-copy">Impossible de charger les recettes : {error}</p></article>}
+    {!data&&!error&&<article className="panel"><p className="panel-copy">Chargement des recettes…</p></article>}
+    {data&&<>
+      <div className="period-tabs">{PERIODS.map(p=>
+        <button type="button" key={p.value} className={period===p.value?'on':''} onClick={()=>setPeriod(p.value)}>{p.label}</button>)}
+      </div>
+
+      <section className="stats-grid revenue-stats">
+        <StatCard icon={Wallet} label={`Encaissé — ${current.label.toLowerCase()}`} value={formatFCFA(slice(data.collected).amount)} note={`${slice(data.collected).count} paiement(s)`}/>
+        <StatCard icon={Landmark} label={`Part administration (${100-data.sharePercent} %)`} value={formatFCFA(slice(data.platform).amount)} note={`${formatFCFA(data.platform.total)} depuis le début`}/>
+        <StatCard icon={Users} label={`À reverser aux délégués (${data.sharePercent} %)`} value={formatFCFA(slice(data.delegates).amount)} note={`${formatFCFA(data.delegates.total)} depuis le début`}/>
+        <StatCard icon={Receipt} label="Total encaissé" value={formatFCFA(data.collected.total)} note={`${data.collected.count} paiement(s) au total`}/>
+      </section>
+
+      <section className="dashboard-grid revenue-grid">
+        <article className="panel">
+          <div className="panel-head"><div><span>Évolution</span><h3>{current.series}</h3></div><BarChart3 size={23}/></div>
+          <RevenueBars buckets={data.collected.series[period]} period={period}/>
+        </article>
+        <article className="panel">
+          <div className="panel-head"><div><span>Répartition</span><h3>Règle de partage</h3></div><Coins size={23}/></div>
+          <div className="split-row"><span>Délégué du quartier</span><strong>{data.sharePercent} %</strong></div>
+          <div className="split-bar"><i style={{width:`${data.sharePercent}%`}}/></div>
+          <div className="split-row"><span>Administration</span><strong>{100-data.sharePercent} %</strong></div>
+          <p className="panel-copy">Le montant est figé au moment du paiement : une modification future du taux ne réécrit pas l’historique déjà encaissé.</p>
+        </article>
+      </section>
+
+      <article className="panel revenue-table-panel">
+        <div className="panel-head"><div><span>Par délégué</span><h3>Part de chacun</h3></div><span className="soft-badge">{data.byDelegate.length} délégué(s)</span></div>
+        {data.byDelegate.length===0
+          ? <p className="panel-copy">Aucun paiement n’a encore été enregistré.</p>
+          : <div className="revenue-table-wrap"><table className="revenue-table">
+              <thead><tr><th>Délégué</th><th>Quartier</th><th>Aujourd’hui</th><th>Cette semaine</th><th>Ce mois</th><th>Total dû</th><th>Paiements</th></tr></thead>
+              <tbody>{data.byDelegate.map(row=>
+                <tr key={row.id||row.name}>
+                  <td><strong>{row.name}</strong></td>
+                  <td>{row.quartier}</td>
+                  <td>{formatFCFA(row.day)}</td>
+                  <td>{formatFCFA(row.week)}</td>
+                  <td>{formatFCFA(row.month)}</td>
+                  <td className="revenue-total">{formatFCFA(row.total)}</td>
+                  <td>{row.count}</td>
+                </tr>)}
+              </tbody>
+            </table></div>}
+      </article>
+
+      <article className="panel revenue-table-panel">
+        <div className="panel-head"><div><span>Journal</span><h3>Derniers paiements</h3></div></div>
+        {data.recent.length===0
+          ? <p className="panel-copy">Aucun paiement pour le moment.</p>
+          : <div className="revenue-table-wrap"><table className="revenue-table">
+              <thead><tr><th>Date</th><th>Quartier</th><th>Délégué</th><th>Opérateur</th><th>Montant</th><th>Part délégué</th><th>Part admin</th></tr></thead>
+              <tbody>{data.recent.map((row,index)=>
+                <tr key={`${row.paidAt}-${index}`}>
+                  <td>{dateTimeFR(row.paidAt)}</td>
+                  <td>{row.quartier}</td>
+                  <td>{row.delegateName}</td>
+                  <td><span className={`provider-chip ${row.provider}`}>{row.providerLabel}</span></td>
+                  <td className="revenue-total">{formatFCFA(row.amount)}</td>
+                  <td>{formatFCFA(row.delegateAmount)}</td>
+                  <td>{formatFCFA(row.platformAmount)}</td>
+                </tr>)}
+              </tbody>
+            </table></div>}
+      </article>
+    </>}
+  </AppShell>
+}
+
 function Protected({ children }) { return isLoggedIn() ? children : <Navigate to="/connexion" replace/> }
 
-export default function App(){return <Routes><Route path="/connexion" element={<LoginPage/>}/><Route path="/dashboard" element={<Protected><DashboardPage/></Protected>}/><Route path="/delegues" element={<Protected><DelegatesPage/></Protected>}/><Route path="/maisons" element={<Protected><HousesPage/></Protected>}/><Route path="/documents" element={<Protected><DocumentsPage/></Protected>}/><Route path="*" element={<Navigate to={isLoggedIn()?'/dashboard':'/connexion'} replace/>}/></Routes>}
+export default function App(){return <Routes><Route path="/connexion" element={<LoginPage/>}/><Route path="/dashboard" element={<Protected><DashboardPage/></Protected>}/><Route path="/delegues" element={<Protected><DelegatesPage/></Protected>}/><Route path="/maisons" element={<Protected><HousesPage/></Protected>}/><Route path="/documents" element={<Protected><DocumentsPage/></Protected>}/><Route path="/recettes" element={<Protected><RevenuePage/></Protected>}/><Route path="*" element={<Navigate to={isLoggedIn()?'/dashboard':'/connexion'} replace/>}/></Routes>}

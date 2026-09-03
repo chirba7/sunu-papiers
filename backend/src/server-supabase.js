@@ -148,6 +148,60 @@ const REJECTION_REASONS = {
   autre: "Autre motif",
 };
 
+
+// --- Recettes ---------------------------------------------------------------
+// Le citoyen paie le certificat au moment ou il le consulte. L'administration
+// encaisse, puis reverse DELEGATE_SHARE % au delegue et garde le reste.
+const DELEGATE_SHARE = Number(process.env.DELEGATE_SHARE_PERCENT) || 90;
+const PROVIDERS = { wave: "Wave", orange_money: "Orange Money" };
+// Le fuseau du projet (Africa/Dakar) est a UTC+0 : les dates ISO renvoyees par
+// Postgres se decoupent directement, sans conversion.
+const dayKey = (iso) => String(iso).slice(0, 10);
+const monthKey = (iso) => String(iso).slice(0, 7);
+const weekKey = (iso) => {
+  const date = new Date(`${dayKey(iso)}T00:00:00Z`);
+  // Semaine ISO : lundi = premier jour.
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return date.toISOString().slice(0, 10);
+};
+const KEYS = { day: dayKey, week: weekKey, month: monthKey };
+const addTo = (map, key, amount) => {
+  const entry = map.get(key) || { key, amount: 0, count: 0 };
+  entry.amount += amount;
+  entry.count += 1;
+  map.set(key, entry);
+};
+const lastBuckets = (map, size) =>
+  [...map.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(-size);
+// Totaux jour / semaine / mois + historique, a partir d'une liste de paiements.
+const summarize = (rows, amountOf) => {
+  const now = new Date().toISOString();
+  const current = { day: dayKey(now), week: weekKey(now), month: monthKey(now) };
+  const buckets = { day: new Map(), week: new Map(), month: new Map() };
+  let total = 0;
+  for (const row of rows) {
+    const amount = amountOf(row);
+    total += amount;
+    for (const period of ["day", "week", "month"])
+      addTo(buckets[period], KEYS[period](row.paid_at), amount);
+  }
+  const at = (period) => buckets[period].get(current[period]) || { amount: 0, count: 0 };
+  return {
+    total,
+    count: rows.length,
+    day: at("day"),
+    week: at("week"),
+    month: at("month"),
+    series: {
+      day: lastBuckets(buckets.day, 14),
+      week: lastBuckets(buckets.week, 12),
+      month: lastBuckets(buckets.month, 12),
+    },
+  };
+};
+// Le paiement est-il exigible ? Un certificat gratuit (prix 0) reste ouvert.
+const paymentRequired = (price) => Number(price || 0) > 0;
+
 const cleanPhone = (v = "") => String(v).replace(/\D/g, "").slice(0, 9);
 const citizenEmail = (phone) => `${cleanPhone(phone)}@citoyen.sunupapier.local`;
 const required = (body, keys) =>
@@ -253,12 +307,61 @@ app.get("/api/health", async (_req, res) => {
       error: error?.message,
     });
 });
+// Le certificat n'est servi qu'apres paiement. Sans ce controle, l'URL signee
+// suffirait a recuperer le PDF en contournant la modale de paiement.
+const certificateGuard = async (user, path) => {
+  const [ownerId, filename] = path.split("/");
+  const reference = decodeURIComponent(filename || "").replace(/\.pdf$/i, "");
+  if (user.role === "admin") return null;
+  const { data: request } = await supabaseAdmin
+    .from("document_requests")
+    .select("id,citizen_id,delegate_id,house_id,house:houses!document_requests_house_id_fkey(document_price)")
+    .eq("citizen_id", ownerId)
+    .eq("reference", reference)
+    .maybeSingle();
+  if (!request) return "Certificat introuvable.";
+  // Le delegue qui a traite le dossier garde acces a sa propre production.
+  if (user.role === "delegate")
+    return request.delegate_id === user.id ? null : "Accès refusé.";
+  if (request.citizen_id !== user.id) return "Accès refusé.";
+  if (!paymentRequired(request.house?.document_price)) return null;
+  const { data: payment } = await supabaseAdmin
+    .from("payments")
+    .select("id")
+    .eq("request_id", request.id)
+    .maybeSingle();
+  return payment ? null : "Ce document n’a pas encore été payé.";
+};
+
 app.get("/uploads/:bucket/*path", authenticate, async (req, res) => {
   const path = Array.isArray(req.params.path)
     ? req.params.path.join("/")
     : req.params.path;
+  const bucket = req.params.bucket;
+  // Chaque bucket range ses fichiers sous l'identifiant de leur proprietaire.
+  const owner = path.split("/")[0];
+  if (bucket === "generated-certificates") {
+    const refusal = await certificateGuard(req.user, path);
+    if (refusal) return fail(res, new Error(refusal), 403);
+  } else if (bucket === "identity-documents") {
+    if (req.user.role === "citizen" && owner !== req.user.id)
+      return fail(res, new Error("Accès refusé."), 403);
+    if (req.user.role === "delegate") {
+      const { count } = await supabaseAdmin
+        .from("document_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("citizen_id", owner)
+        .eq("delegate_id", req.user.id);
+      if (!count) return fail(res, new Error("Accès refusé."), 403);
+    }
+  } else if (bucket === "house-templates") {
+    if (req.user.role === "citizen")
+      return fail(res, new Error("Accès refusé."), 403);
+  } else {
+    return fail(res, new Error("Ressource inconnue."), 404);
+  }
   const { data, error } = await supabaseAdmin.storage
-    .from(req.params.bucket)
+    .from(bucket)
     .createSignedUrl(path, 60);
   if (error) return fail(res, error, 404);
   res.redirect(data.signedUrl);
@@ -706,6 +809,8 @@ app.post(
         quartier: b.quartier.toUpperCase(),
         delegate_id: b.delegateId,
         certificate_fields: parseFields(b.fields) || DEFAULT_CERTIFICATE_FIELDS,
+        // Prix du certificat pour ce quartier, fixe ici une fois pour toutes.
+        document_price: Math.max(0, Math.round(Number(b.price) || 0)),
         certificate_path: null,
         seal_path: null,
         active: true,
@@ -762,6 +867,8 @@ app.put(
         };
       const fields = parseFields(b.fields);
       if (fields) changes.certificate_fields = fields;
+      if (b.price !== undefined && b.price !== "")
+        changes.document_price = Math.max(0, Math.round(Number(b.price) || 0));
       if (req.files?.seal?.[0]) {
         changes.seal_path = await uploadSeal(req.params.id, req.files.seal[0]);
       } else {
@@ -806,7 +913,7 @@ app.delete(
 app.get("/api/houses", authenticate, permit("citizen"), async (_req, res) => {
   const { data, error } = await supabaseAdmin
     .from("houses")
-    .select("id,region,departement,commune,quartier")
+    .select("id,region,departement,commune,quartier,document_price")
     .eq("active", true)
     .not("delegate_id", "is", null)
     .order("quartier");
@@ -832,14 +939,25 @@ app.post("/api/requests", authenticate, permit("citizen"), async (req, res) => {
   if (houseError) return fail(res, houseError);
   if (!house)
     return fail(res, new Error("Cette administration n'est pas disponible."));
+  // Un département homonyme de sa région (Dakar/Dakar) ne doit pas s'écrire deux
+  // fois sur le certificat. On dédoublonne à la composition, sans tenir compte
+  // de la casse ni des espaces.
+  const seen = new Set();
   const address = [
-    `Villa ${citizenProfile.villa_number}`,
+    citizenProfile.villa_number ? `Villa ${citizenProfile.villa_number}` : null,
     house.quartier,
     house.commune,
     house.departement,
     house.region,
   ]
-    .filter(Boolean)
+    .map((part) => String(part || "").trim())
+    .filter((part) => {
+      if (!part) return false;
+      const key = part.toUpperCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .join(", ");
   const { data, error } = await supabaseAdmin
     .from("document_requests")
@@ -864,26 +982,125 @@ app.get(
   async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("document_requests")
-      .select("*")
+      .select(
+        "*,house:houses!document_requests_house_id_fkey(document_price),payment:payments(provider,amount,paid_at,reference)",
+      )
       .eq("citizen_id", req.user.id)
       .order("submitted_at", { ascending: false });
     if (error) return fail(res, error);
     res.json(
-      data.map((r) => ({
-        id: r.id,
-        reference: r.reference,
-        type: r.document_type,
-        status: r.status,
-        address: r.address,
-        certificatePath: r.certificate_path,
-        submittedAt: r.submitted_at,
-        processedAt: r.processed_at,
-        rejectionCode: r.rejection_code,
-        rejectionReason: r.rejection_reason,
-      })),
+      data.map((r) => {
+        // La relation payments arrive sous forme de tableau (0 ou 1 element).
+        const payment = Array.isArray(r.payment) ? r.payment[0] : r.payment;
+        const price = Number(r.house?.document_price || 0);
+        return {
+          id: r.id,
+          reference: r.reference,
+          type: r.document_type,
+          status: r.status,
+          address: r.address,
+          certificatePath: r.certificate_path,
+          submittedAt: r.submitted_at,
+          processedAt: r.processed_at,
+          rejectionCode: r.rejection_code,
+          rejectionReason: r.rejection_reason,
+          price,
+          // Un certificat gratuit est considere comme deja regle.
+          paid: Boolean(payment) || !paymentRequired(price),
+          payment: payment
+            ? {
+                provider: payment.provider,
+                providerLabel: PROVIDERS[payment.provider] || payment.provider,
+                amount: payment.amount,
+                reference: payment.reference,
+                paidAt: payment.paid_at,
+              }
+            : null,
+        };
+      }),
     );
   },
 );
+
+// Paiement simule : aucun operateur n'est appele, mais le montant vient du prix
+// enregistre par l'administrateur, jamais du client.
+app.post("/api/payments", authenticate, permit("citizen"), async (req, res) => {
+  try {
+    const provider = String(req.body.provider || "").toLowerCase();
+    if (!PROVIDERS[provider])
+      return fail(res, new Error("Choisissez Wave ou Orange Money."));
+    const { data: request, error } = await supabaseAdmin
+      .from("document_requests")
+      .select(
+        "id,reference,status,citizen_id,delegate_id,house_id,house:houses!document_requests_house_id_fkey(document_price)",
+      )
+      .eq("id", req.body.requestId)
+      .eq("citizen_id", req.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!request) return fail(res, new Error("Demande introuvable."), 404);
+    if (request.status !== "approved")
+      return fail(
+        res,
+        new Error("Ce document n’est pas encore prêt à être payé."),
+      );
+    const { data: existing } = await supabaseAdmin
+      .from("payments")
+      .select("*")
+      .eq("request_id", request.id)
+      .maybeSingle();
+    // Deuxieme clic, double soumission : on renvoie le paiement deja enregistre
+    // au lieu d'en creer un second.
+    if (existing)
+      return res.json({
+        message: "Ce document est déjà payé.",
+        alreadyPaid: true,
+        payment: {
+          provider: existing.provider,
+          providerLabel: PROVIDERS[existing.provider],
+          amount: existing.amount,
+          reference: existing.reference,
+          paidAt: existing.paid_at,
+        },
+      });
+    const amount = Math.max(0, Number(request.house?.document_price || 0));
+    if (!paymentRequired(amount))
+      return fail(res, new Error("Ce document est gratuit."));
+    // L'arrondi va au delegue : la somme des deux parts reste egale au montant.
+    const platformAmount = Math.round((amount * (100 - DELEGATE_SHARE)) / 100);
+    const reference = `PAY-${request.reference}-${Date.now().toString(36).toUpperCase()}`;
+    const { data: payment, error: insertError } = await supabaseAdmin
+      .from("payments")
+      .insert({
+        request_id: request.id,
+        citizen_id: req.user.id,
+        delegate_id: request.delegate_id,
+        house_id: request.house_id,
+        provider,
+        amount,
+        delegate_amount: amount - platformAmount,
+        platform_amount: platformAmount,
+        delegate_share_percent: DELEGATE_SHARE,
+        reference,
+      })
+      .select()
+      .single();
+    if (insertError) throw insertError;
+    res.status(201).json({
+      message: `Paiement de ${amount} F CFA confirmé via ${PROVIDERS[provider]}.`,
+      payment: {
+        provider: payment.provider,
+        providerLabel: PROVIDERS[payment.provider],
+        amount: payment.amount,
+        reference: payment.reference,
+        paidAt: payment.paid_at,
+      },
+    });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 // Compteur leger sonde par le front toutes les 20 s.
 // Une seule requete, deux colonnes, et un cache memoire de 30 s : la base n'est
 // pas sollicitee a chaque sondage.
@@ -1112,6 +1329,107 @@ app.patch(
     } catch (error) {
       fail(res, error);
     }
+  },
+);
+
+// --- Recettes du delegue -----------------------------------------------------
+// Il ne voit que sa part (90 %), jamais la commission de la plateforme.
+app.get(
+  "/api/delegate/revenue",
+  authenticate,
+  permit("delegate"),
+  async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select(
+        "amount,delegate_amount,provider,paid_at,reference,request:document_requests!payments_request_id_fkey(reference,document_type,citizen:profiles!document_requests_citizen_id_fkey(first_name,last_name))",
+      )
+      .eq("delegate_id", req.user.id)
+      .order("paid_at", { ascending: false });
+    if (error) return fail(res, error);
+    res.json({
+      sharePercent: DELEGATE_SHARE,
+      ...summarize(data, (row) => row.delegate_amount),
+      // Les 30 derniers encaissements, pour le detail affiche sous les totaux.
+      recent: data.slice(0, 30).map((row) => ({
+        paidAt: row.paid_at,
+        amount: row.amount,
+        share: row.delegate_amount,
+        provider: row.provider,
+        providerLabel: PROVIDERS[row.provider] || row.provider,
+        reference: row.request?.reference || row.reference,
+        documentType: row.request?.document_type || "Certificat de domicile",
+        citizen: row.request?.citizen
+          ? `${row.request.citizen.first_name} ${row.request.citizen.last_name}`.trim()
+          : "",
+      })),
+    });
+  },
+);
+
+// --- Recettes de l'administration -------------------------------------------
+// Vue globale : total encaisse, part plateforme, et ce qui revient a chaque
+// delegue sur la journee, la semaine et le mois en cours.
+app.get(
+  "/api/admin/revenue",
+  authenticate,
+  permit("admin"),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select(
+        "amount,delegate_amount,platform_amount,delegate_id,provider,paid_at,house:houses!payments_house_id_fkey(quartier),delegate:profiles!payments_delegate_id_fkey(first_name,last_name)",
+      )
+      .order("paid_at", { ascending: false });
+    if (error) return fail(res, error);
+    const byDelegate = new Map();
+    for (const row of data) {
+      const key = row.delegate_id || "sans-delegue";
+      if (!byDelegate.has(key))
+        byDelegate.set(key, {
+          id: row.delegate_id,
+          name: row.delegate
+            ? `${row.delegate.first_name} ${row.delegate.last_name}`.trim()
+            : "Délégué retiré",
+          quartier: row.house?.quartier || "—",
+          rows: [],
+        });
+      byDelegate.get(key).rows.push(row);
+    }
+    res.json({
+      sharePercent: DELEGATE_SHARE,
+      collected: summarize(data, (row) => row.amount),
+      platform: summarize(data, (row) => row.platform_amount),
+      delegates: summarize(data, (row) => row.delegate_amount),
+      byDelegate: [...byDelegate.values()]
+        .map((entry) => {
+          const totals = summarize(entry.rows, (row) => row.delegate_amount);
+          return {
+            id: entry.id,
+            name: entry.name,
+            quartier: entry.quartier,
+            count: totals.count,
+            total: totals.total,
+            day: totals.day.amount,
+            week: totals.week.amount,
+            month: totals.month.amount,
+            collected: entry.rows.reduce((sum, row) => sum + row.amount, 0),
+          };
+        })
+        .sort((a, b) => b.total - a.total),
+      recent: data.slice(0, 30).map((row) => ({
+        paidAt: row.paid_at,
+        amount: row.amount,
+        delegateAmount: row.delegate_amount,
+        platformAmount: row.platform_amount,
+        provider: row.provider,
+        providerLabel: PROVIDERS[row.provider] || row.provider,
+        quartier: row.house?.quartier || "—",
+        delegateName: row.delegate
+          ? `${row.delegate.first_name} ${row.delegate.last_name}`.trim()
+          : "—",
+      })),
+    });
   },
 );
 

@@ -482,3 +482,34 @@ body { font-size: 16px; line-height: 1.62; }
   .page-content { width: min(1160px, calc(100% - 64px)); }
   .paper-list { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------- paiement simulé */
+
+.payment-modal { width: min(100%, 470px); display: grid; gap: 18px; }
+.payment-modal .modal-x { position: absolute; }
+.payment-head { display: flex; align-items: center; gap: 14px; }
+.payment-head h3 { margin: 0 0 3px; }
+.payment-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 15px; background: var(--green-100); color: var(--green-700); flex: none; }
+
+.payment-amount { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 18px; border-radius: 16px; background: var(--green-50); border: 1px solid var(--green-100); }
+.payment-amount span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.payment-amount strong { font-family: 'Manrope', sans-serif; font-size: 26px; letter-spacing: -.8px; color: var(--green-800); }
+
+.payment-providers { display: grid; gap: 10px; }
+.payment-label { font-size: 13px; font-weight: 700; color: var(--ink); }
+.payment-provider { position: relative; display: flex; align-items: center; gap: 13px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 15px; cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.payment-provider:hover { border-color: var(--accent, var(--green-600)); }
+.payment-provider.on { border-color: var(--accent, var(--green-600)); background: #fbfdfc; }
+.payment-provider input { position: absolute; opacity: 0; pointer-events: none; }
+.payment-provider img { width: 40px; height: 40px; border-radius: 12px; flex: none; object-fit: cover; }
+.payment-provider span { font-weight: 700; font-size: 15px; }
+.payment-check { margin-left: auto; color: var(--accent, var(--green-600)); opacity: 0; transition: opacity .16s ease; }
+.payment-provider.on .payment-check { opacity: 1; }
+
+.payment-note { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.payment-note svg { flex: none; margin-top: 2px; color: var(--green-600); }
+.payment-error { display: flex; gap: 7px; align-items: center; font-size: 13px; font-weight: 600; color: var(--danger); margin: 0; }
+
+.paper-paid { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 13px; border-radius: 12px; background: var(--green-50); color: var(--green-800); font-size: 13px; font-weight: 600; }
+.paper-paid svg { flex: none; }
+.pay-button { border: 0; cursor: pointer; font-family: inherit; }

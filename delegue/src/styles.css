@@ -297,3 +297,28 @@ body { font-size: 16px; line-height: 1.6; }
 /* La colonne de gauche ne porte plus que la carte d'identité : elle peut rétrécir. */
 .entry-workspace { grid-template-columns: minmax(280px, .62fr) minmax(540px, 1.38fr); }
 @media (max-width: 1100px) { .entry-workspace { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------- mes recettes */
+.period-tabs{display:inline-flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:14px;background:#fff;margin-bottom:18px}
+.period-tabs button{border:0;background:transparent;height:38px;padding:0 16px;border-radius:10px;font-weight:700;font-size:13px;color:#6b7581}
+.period-tabs button.on{background:var(--soft);color:var(--brand)}
+.revenue-stats strong{font-size:23px;letter-spacing:-.6px}
+.revenue-bars{display:grid;gap:12px}
+.revenue-bar{display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:12px}
+.revenue-bar-label{font-size:12px;color:#828b96;text-transform:capitalize}
+.revenue-bar-track{height:8px;border-radius:999px;background:#eef2f7;overflow:hidden}
+.revenue-bar-track i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--dark),var(--brand2))}
+.revenue-bar strong{font-size:12.5px;white-space:nowrap}
+.revenue-recent{margin-top:18px}
+.revenue-table-wrap{overflow-x:auto}
+.revenue-table{width:100%;border-collapse:collapse;font-size:13px;min-width:620px}
+.revenue-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#9ca3ad;padding:0 12px 10px;white-space:nowrap}
+.revenue-table td{padding:12px;border-top:1px solid #eef2f7;color:#5f6a77;white-space:nowrap}
+.revenue-table td strong{color:var(--ink)}
+.revenue-total{font-weight:800;color:var(--ink)!important}
+.soft-badge{font-size:11px;font-weight:800;color:#7d8894;background:#f4f7fa;padding:7px 10px;border-radius:999px}
+.provider-chip{display:inline-block;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.provider-chip.wave{background:#e2f8fe;color:#0b6b85}
+.provider-chip.orange_money{background:#fff0e2;color:#a34d00}
+.list-state{color:var(--muted);margin:0}
+@media(max-width:600px){.period-tabs{display:grid;grid-template-columns:1fr 1fr 1fr;width:100%}.period-tabs button{padding:0 8px;font-size:12px}.revenue-bar{grid-template-columns:1fr;gap:4px}}

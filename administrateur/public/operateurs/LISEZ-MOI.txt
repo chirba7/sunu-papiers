@@ -1,0 +1,9 @@
+Logos des operateurs de paiement.
+
+Les deux fichiers wave.png et orange-money.png sont des PLACEHOLDERS.
+Remplacez-les par les vrais logos en gardant exactement les memes noms de
+fichiers (wave.png / orange-money.png) : les trois applications les chargent
+depuis /operateurs/.
+
+Un PNG fonctionne aussi : deposez wave.png et orange-money.png puis remplacez
+l'extension dans la constante PAYMENT_PROVIDERS du fichier src/App.jsx.

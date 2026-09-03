@@ -124,3 +124,38 @@ export const DOCUMENT_TYPES = [
   { value: 'domicile', label: 'Certificat de domicile', available: true, match: /domicile/i },
   { value: 'residence', label: 'Certificat de résidence', available: false, match: /r[ée]sidence/i },
 ]
+
+/* ---------------------------------------------------------------- paiement */
+
+/**
+ * Opérateurs proposés dans la modale de paiement.
+ *
+ * `logo` pointe vers public/operateurs/ : remplacez ces fichiers par les vrais
+ * logos en gardant les mêmes noms, rien d'autre n'est à changer ici.
+ */
+export const PAYMENT_PROVIDERS = [
+  { value: 'wave', label: 'Wave', logo: '/operateurs/wave.png', accent: '#1DC8F2' },
+  { value: 'orange_money', label: 'Orange Money', logo: '/operateurs/orange-money.png', accent: '#FF7900' },
+]
+
+/** 2000 → « 2 000 F CFA ». */
+export const formatFCFA = (value) =>
+  `${new Intl.NumberFormat('fr-FR').format(Math.max(0, Math.round(Number(value) || 0)))} F CFA`
+
+/**
+ * Paie un document puis met à jour le cache local, sans recharger la liste :
+ * le bouton de téléchargement apparaît immédiatement.
+ */
+export async function payPaper(requestId, provider) {
+  const result = await api('/payments', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, provider }),
+  })
+  set({
+    papers: state.papers.map((paper) =>
+      paper.id === requestId ? { ...paper, paid: true, payment: result.payment } : paper,
+    ),
+    loadedAt: Date.now(),
+  })
+  return result
+}
